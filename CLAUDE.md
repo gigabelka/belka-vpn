@@ -1,0 +1,131 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository. All answers must be in Russian.
+
+## What this repository is
+
+Idempotent Bash provisioning for a two-server split-tunnel VPN. Clients connect only to
+the **RU** server (Hiddify Manager, VLESS + Reality, Xray core); selected traffic is
+forwarded over an AmneziaWG tunnel to the **FOREIGN** server, which resolves domains and
+egresses. Everything else leaves directly from Russia.
+
+There is no application code, build system, package manager, or CI. The unit of work is
+shell scripts under `scripts/` plus `envsubst` templates under `config/`. User-facing docs
+(README, `docs/`, the Hiddify checklist) are Russian; scripts, comments, and this file are
+English. Roles are always named exactly `ru` and `foreign`.
+
+## Hard invariants
+
+- **No real identifiers in the repo.** Public IPs, keys, passwords, tokens, and the
+  Hiddify admin link must never be committed. `RU_PUBLIC_IP` / `FOREIGN_PUBLIC_IP` stay
+  empty in `.env.example` and `scripts/env/*.env.example`. `tests/lint.sh` fails on
+  hardcoded public IPv4 outside its allowlist and on private-key material.
+- Never add `set -x`, and never print private keys or the Hiddify admin link.
+- `load_handoff` deliberately rejects files containing secrets; handoffs carry public
+  keys and obfuscation parameters only.
+- RU firewall is owned by Hiddify Manager (`ENABLE_UFW=0`); only the FOREIGN server uses
+  UFW. Do not add manual `ufw`/`iptables` rules on RU.
+
+## Commands
+
+Repo checks (the only local "tests"):
+
+```bash
+bash tests/lint.sh          # full suite; exits non-zero on any FAIL
+bash -n scripts/lib.sh      # single-file syntax check
+```
+
+`tests/lint.sh` runs `bash -n` on all scripts, `shellcheck -S error` when installed,
+required-template checks, secret scans, `.gitignore` coverage, the public-IPv4 allowlist,
+and the ban on legacy `fi*` / Finnish names.
+
+Deployment (as root, Ubuntu 22.04/24.04, repo at `/opt/belka-vpn`):
+
+```bash
+bash scripts/configure.sh --role both --output-dir ./env        # writes ru.env + foreign.env
+bash scripts/configure.sh --non-interactive --role both --output-dir ./env  # values from env
+bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
+bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
+bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+bash scripts/verify.sh                    # on RU
+bash scripts/verify.sh --role foreign     # on FOREIGN
+bash scripts/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env  # fetch ref + run stage
+```
+
+`foreign-setup.sh` and `ru-setup.sh` also accept `--dry-run` and `--uninstall`; both
+paths still require an env file containing both public IPs, because the `:?` checks run
+before argument dispatch. `foreign-setup.sh --ru-pub KEY` supplies the RU public key
+directly instead of via a handoff file. Extra `bootstrap.sh` arguments are forwarded
+verbatim to the selected setup script; `--ref` defaults to `main`.
+
+## Architecture
+
+```text
+Hiddify app ──VLESS+Reality/443──► RU (Hiddify Manager / Xray)
+                                      ├─ matched domains/geosites ──SOCKS5──► FOREIGN (Xray)
+                                      │                                         │
+                                      │                                    internet egress
+                                      └─ everything else ──► Direct (RU)
+RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0.1 FOREIGN
+```
+
+- `AllowedIPs` are `/32` on each side and the default route is never taken. FOREIGN runs
+  SOCKS5 on `172.16.0.1:1080`, reachable only over the tunnel. **SOCKS, not NAT, is
+  intentional**: domains resolve on the foreign side, so YouTube/Google avoid Russian GGC
+  addresses and Anthropic sees a foreign IP; no `ip_forward`/NAT is needed.
+- RU has two foreign outbounds plus a default, in this order: `FOREIGN-Domains`
+  (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Telegram-IP`
+  (`geoip:telegram`), then `Direct`. The split avoids `domainStrategy: IPOnDemand`
+  resolving a Google domain through Russian DNS first.
+- Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
+  rewriting (`routeOnly=false`, sniffing `http/tls/quic`) only work there.
+- Handoff exchange is circular and public-only: the first run of each role emits
+  `/root/belka-<role>-handoff.env`; copy the other side's handoff in on the second pass.
+
+## Code layout
+
+- `scripts/lib.sh` — shared core, sourced not executed: logging (`log`, `warn`, `die`,
+  `belka_init`), env/handoff loading, apt helpers, AmneziaWG install and key/obfuscation
+  generation, `render_template`, `write_if_changed`, UFW/fail2ban, SSH hardening.
+  Interactive output is written to fd 3 so it does not receive log formatting.
+- `scripts/{foreign,ru}-setup.sh` — per-role orchestration. `ru-setup.sh` installs
+  Hiddify Manager **before** bringing up `awg0` so the Hiddify installer cannot touch the
+  tunnel; it then writes `/root/belka-ru-manual-checklist.txt`.
+- `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer, SOCKS
+  binding (must not listen on `0.0.0.0`), egress IP matches `FOREIGN_PUBLIC_IP`,
+  YouTube `generate_204` returns 204, `api.anthropic.com` must not return 403,
+  Hiddify services running.
+- `config/` — `.tpl` files rendered with `envsubst`; only exported variables are
+  substituted, and **unset variables silently become empty**. `config/rules/*` are copied
+  verbatim to `/root/` on RU for the manual Hiddify setup.
+
+## Idempotency and state
+
+`render_template` and `write_if_changed` compare against the destination with `cmp` and
+set `TEMPLATE_CHANGED`; services restart only when a config changed or the unit is
+inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-in with
+`ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1`.
+
+- Env files: `/etc/belka-vpn/{ru,foreign}.env`, mode 600. Defaults live in
+  `apply_defaults()` in `lib.sh`; `configure.sh` contains its own copies of the same
+  defaults and writes the role-specific flags.
+- Server state: keys in `/etc/amnezia/amneziawg/keys`, obfuscation in
+  `/etc/belka-vpn/foreign-obfuscation.env`, Xray in `/usr/local/etc/xray`, Hiddify in
+  `/opt/hiddify-manager`, logs in `/var/log/belka-vpn-{ru,foreign,verify,bootstrap}.log`.
+- Modes: 600 for env files, handoffs, keys, logs, and the checklist; 644 for system
+  configs; 700 for `/etc/belka-vpn` and the key directory.
+
+## Operational gotchas
+
+- Hiddify Manager overwrites its generated Xray config on "Apply now". Change routing only
+  through the panel UI; never edit its generated files.
+- `Jmax` must not exceed MTU (start at 1280; drop to 1240 on fragmentation). Obfuscation
+  parameters must match on both peers, and after rotation **both** handoffs must be
+  re-exchanged or the handshake stops. `AWG_ENABLE_S3S4=0` is the safe default.
+- Hiddify blocks QUIC/443 server-side, so YouTube/Google fall back to TCP. Claude Code
+  does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
+- Hiddify Manager removal is intentionally manual and destructive; `ru-setup.sh
+  --uninstall` leaves it installed.
+- Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
+  order), `docs/troubleshooting.md` (diagnosis), and the Russian README quick start.
