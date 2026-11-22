@@ -53,7 +53,7 @@ preflight_foreign() {
   if [[ ! -f $AWG_DIR/awg0.conf ]] && port_udp_busy "$AWG_PORT"; then
     die "UDP/$AWG_PORT is already in use"
   fi
-  if ss -lntp 2>/dev/null | grep -q ":${SOCKS_PORT} "; then
+  if grep -q ":${SOCKS_PORT} " <<< "$(ss -lntp 2>/dev/null)"; then
     warn "TCP/$SOCKS_PORT is already listening (check for conflicts)"
   fi
 }

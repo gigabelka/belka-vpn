@@ -241,17 +241,17 @@ check_foreign() {
   else
     bad "xray is not active"
   fi
-  if ss -lntp 2>/dev/null | grep -Fq "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"; then
+  if grep -Fq "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" <<< "$(ss -lntp 2>/dev/null)"; then
     ok "SOCKS listens on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
   else
     bad "SOCKS does not listen on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
   fi
-  if ss -lntu 2>/dev/null | grep -Eq "0\.0\.0\.0:${SOCKS_PORT}|\[::\]:${SOCKS_PORT}"; then
+  if grep -Eq "0\.0\.0\.0:${SOCKS_PORT}|\[::\]:${SOCKS_PORT}" <<< "$(ss -lntu 2>/dev/null)"; then
     bad "SOCKS is exposed publicly on port ${SOCKS_PORT}"
   else
     ok "SOCKS is not exposed publicly"
   fi
-  if ufw status 2>/dev/null | grep -q "Status: active"; then
+  if grep -q "Status: active" <<< "$(ufw status 2>/dev/null)"; then
     ok "ufw is active"
   else
     warn "ufw is not active (check provider firewall)"
@@ -300,13 +300,13 @@ check_ru() {
 
   check_gemini
 
-  if systemctl list-units --type=service --state=running 'hiddify*' --no-legend 2>/dev/null | grep -q .; then
+  if grep -q . <<< "$(systemctl list-units --type=service --state=running 'hiddify*' --no-legend 2>/dev/null)"; then
     ok "Hiddify services are running"
   else
     bad "Hiddify services are not running"
   fi
 
-  if ss -lntp 2>/dev/null | grep -q ':443 '; then
+  if grep -q ':443 ' <<< "$(ss -lntp 2>/dev/null)"; then
     ok "TCP/443 is listening"
   else
     warn "TCP/443 is not listening yet (Reality inbound not applied?)"

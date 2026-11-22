@@ -55,7 +55,7 @@ preflight_ru() {
   # RU is the AmneziaWG client (no ListenPort): AWG_PORT is only the remote
   # endpoint, so a local UDP/$AWG_PORT listener is not a conflict.
   if [[ ${INSTALL_HIDDIFY:-1} == 1 && ! -d /opt/hiddify-manager ]]; then
-    if ss -lntp 2>/dev/null | grep -qE ':(80|443) '; then
+    if grep -qE ':(80|443) ' <<< "$(ss -lntp 2>/dev/null)"; then
       die "ports 80/443 are in use; Hiddify Manager needs them (stop the service or set INSTALL_HIDDIFY=0)"
     fi
   fi
@@ -201,7 +201,7 @@ write_checklist() {
 summary_ru() {
   log INFO "RU setup complete"
   local handshake=absent
-  if awg show awg0 latest-handshakes 2>/dev/null | awk 'NR==1{print $2}' | grep -qE '^[1-9]'; then
+  if grep -qE '^[1-9]' <<< "$(awg show awg0 latest-handshakes 2>/dev/null | awk 'NR==1{print $2}')"; then
     handshake=present
   fi
   cat >&3 <<EOF

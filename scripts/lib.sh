@@ -426,13 +426,13 @@ validate_tunnel_net() {
 }
 
 check_tunnel_conflict() {
-  if ip -4 route show | grep -Fq "$TUNNEL_NET" && ! ip link show awg0 >/dev/null 2>&1; then
+  if grep -Fq "$TUNNEL_NET" <<< "$(ip -4 route show)" && ! ip link show awg0 >/dev/null 2>&1; then
     warn "route for $TUNNEL_NET already exists; check Docker/libvirt/LAN conflicts"
   fi
 }
 
 port_udp_busy() {
-  ss -lunp 2>/dev/null | awk '{print $4}' | grep -qE "[:.]$1$"
+  grep -qE "[:.]$1$" <<< "$(ss -lunp 2>/dev/null | awk '{print $4}')"
 }
 
 tunnel_peer_present() {

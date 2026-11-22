@@ -52,6 +52,16 @@ else
   note "skip shellcheck (not installed)"
 fi
 
+# 2b. No `cmd | grep -q` under pipefail: grep -q exits on the first match, the
+# producer gets SIGPIPE and the pipeline reports failure at random. Capture the
+# output first: grep -q PATTERN <<< "$(cmd)".
+if grep -nE '\|[[:space:]]*grep[[:space:]]+-[A-Za-z]*q' scripts/*.sh tests/*.sh \
+    | grep -v '^tests/lint\.sh:'; then
+  fail "pipe into grep -q found (see lines above); use grep -q ... <<< \"\$(cmd)\""
+else
+  note "ok   no pipes into grep -q"
+fi
+
 # 3. Templates are present and parameterised
 for tpl in \
   config/foreign/awg0.conf.tpl \
