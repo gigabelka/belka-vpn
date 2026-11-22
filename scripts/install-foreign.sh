@@ -186,9 +186,11 @@ setup_firewall_foreign() {
 
 summary_foreign() {
   log INFO "FOREIGN setup complete"
+  local ru_peer=absent
+  [[ -n $RU_PUBLIC_KEY ]] && ru_peer=present
   cat >&3 <<EOF
 FOREIGN readiness
-  awg0:        ${FOREIGN_TUNNEL_IP}/24, UDP/${AWG_PORT} (RU peer: ${RU_PUBLIC_KEY:+present}${RU_PUBLIC_KEY:-absent})
+  awg0:        ${FOREIGN_TUNNEL_IP}/24, UDP/${AWG_PORT} (RU peer: ${ru_peer})
   xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
   handoff:     /root/belka-foreign-handoff.env
 
