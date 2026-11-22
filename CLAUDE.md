@@ -19,7 +19,10 @@ English. Roles are always named exactly `ru` and `foreign`.
 - **No real identifiers in the repo.** Public IPs, keys, passwords, tokens, and the
   Hiddify admin link must never be committed. `RU_PUBLIC_IP` / `FOREIGN_PUBLIC_IP` stay
   empty in `.env.example` and `scripts/env/*.env.example`. `tests/lint.sh` fails on
-  hardcoded public IPv4 outside its allowlist and on private-key material.
+  hardcoded public IPv4 outside its allowlist and on private-key material. The sole
+  exception is `config/client/hiddify-allowedips.txt`: it is a client routing list (the
+  inverse of the Direct/bypass list), not a server identifier. `tests/lint.sh` excludes
+  exactly that path from the IPv4 check and validates separately that it is CIDR-only.
 - Never add `set -x`, and never print private keys or the Hiddify admin link.
 - `load_handoff` deliberately rejects files containing secrets; handoffs carry public
   data only: public keys, obfuscation parameters, and the shared tunnel settings (public
@@ -43,7 +46,9 @@ bash -n scripts/lib.sh      # single-file syntax check
 
 `tests/lint.sh` runs `bash -n` on all scripts, `shellcheck -S error` when installed,
 required-template checks, secret scans, `.gitignore` coverage, the public-IPv4 allowlist,
-and the ban on legacy `fi*` / Finnish names and on the old setup-script filenames.
+and the ban on legacy `fi*` / Finnish names and on the old setup-script filenames. The
+IPv4 allowlist scan exempts only `config/client/hiddify-allowedips.txt` (a routing list);
+that file is checked separately to contain nothing but CIDR lines.
 Content scans cover only git-visible files (tracked plus untracked-not-ignored), so
 gitignored runtime files such as `env/` or `.env` are skipped. In a copy without `.git`
 (the tar copy on the servers) they scan every file.
@@ -111,6 +116,12 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   substituted, and **unset variables silently become empty**. `config/rules/*` are
   written to `/root/belka-foreign-{domains,geosites,telegram-ip}.txt` on RU with comments
   and blank lines stripped (Hiddify rejects them), for the manual Hiddify setup.
+- `config/client/` — Hiddify app routing data, documentation-only (no script reads it):
+  `hiddify-bypass.txt.example` is the Direct/bypass template, and
+  `hiddify-allowedips.txt` is its canonical inverse (199 CIDRs) for clients that take
+  `AllowedIPs` literally. The Hiddify app itself is configured through its GUI; its
+  `route_rule.proto` (binary protobuf) and `configs/*.json` (keys) are never edited or
+  committed.
 
 ## Idempotency and state
 
@@ -141,6 +152,12 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 - `Jmax` must not exceed MTU (start at 1280; drop to 1240 on fragmentation). Obfuscation
   parameters must match on both peers, and after rotation **both** handoffs must be
   re-exchanged or the handshake stops. `AWG_ENABLE_S3S4=0` is the safe default.
+- Google's own geo database can place the FOREIGN IPv4 in Russia while ipinfo/RIPE say
+  otherwise; signed-in Gemini is then blocked. Check `x-country` via the SOCKS
+  (`google_country` in `lib.sh`, also in `verify.sh`). `GOOGLE_IPV6_EGRESS=1` on FOREIGN
+  sends `geosite:google` out over IPv6 (`ForceIPv6`; native, or an HE 6in4 tunnel via
+  `HE_SERVER_IPV4`/`HE_CLIENT_IPV6`); YouTube stays on IPv4. Off by default, and the
+  rendered Xray config is then unchanged.
 - Hiddify blocks QUIC/443 server-side, so YouTube/Google fall back to TCP. Claude Code
   does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
 - Hiddify Manager removal is intentionally manual and destructive; `install-ru.sh

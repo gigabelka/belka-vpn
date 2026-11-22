@@ -1,0 +1,12 @@
+# Hiddify app (client): addresses that bypass the VPN (routed Direct).
+#
+# Copy to config/client/hiddify-bypass.local.txt (gitignored) and put the real
+# CIDRs there, one per line. Do not commit server addresses.
+# The inverse list (everything NOT bypassed) is in
+# config/client/hiddify-allowedips.txt.
+# Apply in the client: Settings -> Routing rules -> add rule -> IP CIDR,
+# paste the lines without comments, outbound Direct, then reconnect.
+10.0.0.0/8
+172.16.0.0/16
+192.168.0.0/16
+192.0.2.0/24

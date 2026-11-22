@@ -33,7 +33,7 @@
       "tag": "block",
       "protocol": "blackhole",
       "settings": {}
-    }
+    }${XRAY_EXTRA_OUTBOUNDS}
   ],
   "routing": {
     "domainStrategy": "AsIs",
@@ -49,7 +49,7 @@
           "100.64.0.0/10"
         ],
         "outboundTag": "block"
-      }
+      }${XRAY_EXTRA_RULES}
     ]
   }
 }

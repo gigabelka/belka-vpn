@@ -196,6 +196,37 @@ bash scripts/verify.sh --role foreign
 5. DNS/IPv6 leak-тесты.
 6. Claude Code в TUN-режиме.
 
+## IPv6-выход для Google
+
+Нужен, когда `verify.sh` на RU пишет «Google geolocates the FOREIGN exit as RU»: Gemini
+со входом в аккаунт тогда блокируется, хотя `ipinfo.io` показывает зарубежную страну.
+С `GOOGLE_IPV6_EGRESS=1` Xray на FOREIGN отправляет `geosite:google` и
+`geosite:google-gemini` через IPv6 (`ForceIPv6`). YouTube и всё остальное остаются на
+IPv4. RU и панель Hiddify не меняются.
+
+1. Если у FOREIGN нет нативного IPv6, зарегистрируйтесь на tunnelbroker.net и создайте
+   Regular Tunnel: IPv4 Endpoint — `FOREIGN_PUBLIC_IP`, сервер туннеля в ЕС
+   (Amsterdam, Frankfurt, Paris).
+2. В `/etc/belka-vpn/foreign.env`:
+
+   ```bash
+   GOOGLE_IPV6_EGRESS=1
+   HE_SERVER_IPV4=<Server IPv4 Address>
+   HE_CLIENT_IPV6=<Client IPv6 Address, с /64>
+   ```
+
+   При нативном IPv6 оставьте `HE_*` пустыми.
+3. `bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env`. Скрипт
+   поднимает `belka-he-ipv6.service` (6in4), разрешает в UFW proto 41 от сервера HE и
+   проверяет `https://www.google.com/generate_204` по IPv6. Конфиг Xray меняется только
+   после успешной проверки. Страну по IPv6 глазами Google скрипт пишет в лог.
+4. `bash scripts/verify.sh --role foreign`, затем `bash scripts/verify.sh` на RU:
+   страна Google для FOREIGN не должна быть `ru`.
+5. На клиенте очистите site data `gemini.google.com` и войдите заново.
+
+Отключение: `GOOGLE_IPV6_EGRESS=0` и повторный запуск установщика. Юнит туннеля и
+правило UFW удаляются.
+
 ## 10. Обновление и ротация
 
 Повторный запуск скриптов идемпотентен. Ключи и обфускация переиспользуются.

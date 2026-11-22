@@ -218,6 +218,15 @@ check_gemini() {
     *)  ok "Gemini: FOREIGN exit country is ${country}" ;;
   esac
 
+  # Gemini enforces Google's own geo database, which can disagree with ipinfo.io.
+  local gcountry
+  gcountry=$(google_country --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}")
+  case "$gcountry" in
+    "") warn "Gemini: could not read Google's country for the FOREIGN exit (x-country)" ;;
+    ru) warn "Gemini: Google geolocates the FOREIGN exit as RU; signed-in Gemini is blocked (see GOOGLE_IPV6_EGRESS in docs/troubleshooting.md)" ;;
+    *)  ok "Gemini: Google sees the FOREIGN exit as ${gcountry}" ;;
+  esac
+
   tmp=$(mktemp)
   code=$(curl -4 -sS -L --compressed --max-time 25 \
     -H 'Accept-Language: ru-RU,ru;q=0.9,en;q=0.8' \
@@ -255,6 +264,44 @@ check_foreign() {
     ok "ufw is active"
   else
     warn "ufw is not active (check provider firewall)"
+  fi
+  if [[ $GOOGLE_IPV6_EGRESS == 1 ]]; then
+    check_google_ipv6
+  fi
+}
+
+check_google_ipv6() {
+  if [[ -n $HE_SERVER_IPV4 ]]; then
+    if systemctl is-active -q belka-he-ipv6; then
+      ok "HE IPv6 tunnel (belka-he-ipv6) is active"
+    else
+      bad "HE IPv6 tunnel (belka-he-ipv6) is not active"
+    fi
+  fi
+  if grep -q . <<< "$(ip -6 route show default 2>/dev/null)"; then
+    ok "IPv6 default route present"
+  else
+    bad "no IPv6 default route: Google traffic (ForceIPv6) will fail"
+    return
+  fi
+  local code country
+  code=$(curl -6 -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+    https://www.google.com/generate_204 2>/dev/null || true)
+  if [[ $code == 204 ]]; then
+    ok "Google over IPv6 returns 204"
+  else
+    bad "Google over IPv6 returns ${code:-no response}"
+  fi
+  country=$(google_country -6)
+  case "$country" in
+    "") warn "could not read Google's country for the IPv6 egress" ;;
+    ru) warn "Google geolocates the IPv6 egress as RU; Gemini stays blocked" ;;
+    *)  ok "Google sees the IPv6 egress as ${country}" ;;
+  esac
+  if grep -q '"google-v6"' /usr/local/etc/xray/config.json 2>/dev/null; then
+    ok "Xray routes Google via outbound google-v6"
+  else
+    bad "Xray config has no google-v6 outbound (rerun install-foreign.sh)"
   fi
 }
 

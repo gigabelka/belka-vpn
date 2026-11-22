@@ -67,6 +67,7 @@ for tpl in \
   config/foreign/awg0.conf.tpl \
   config/foreign/awg0-peer.tpl \
   config/foreign/xray-socks.json.tpl \
+  config/foreign/he-ipv6.service.tpl \
   config/ru/awg0.conf.tpl \
   config/ru/hiddify-checklist.txt.tpl; do
   if [[ -r $tpl ]]; then
@@ -147,6 +148,12 @@ done
 
 # 8. No hardcoded public IPv4 outside the allowlist.
 # This catches real server addresses without naming them in this file.
+#
+# Exception: config/client/hiddify-allowedips.txt is a routing list (the
+# inverse of the client Direct list), not an identifier. It is excluded from
+# the allowlist scan below and validated separately in 8b as CIDR-only.
+CLIENT_CIDR_FILE=config/client/hiddify-allowedips.txt
+
 allowed_ipv4() {
   case "$1" in
     0.0.0.0|255.255.255.255|1.1.1.1|8.8.8.8) return 0 ;;
@@ -160,7 +167,8 @@ allowed_ipv4() {
 }
 
 mapfile -t ipv4 < <(
-  scan_grep -hoE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' 2>/dev/null | sort -u
+  scan_grep -hoE --exclude='hiddify-allowedips.txt' \
+    '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' 2>/dev/null | sort -u
 )
 ipv4_bad=0
 for ip in "${ipv4[@]}"; do
@@ -173,6 +181,24 @@ if (( ${#ipv4[@]} == 0 )); then
   note "ok   no IPv4 literals found"
 elif (( ! ipv4_bad )); then
   note "ok   IPv4 literals checked (${#ipv4[@]} unique)"
+fi
+
+# 8b. The one exempted client list must be a pure IPv4 CIDR list.
+octet='(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])'
+cidr_re="^${octet}\.${octet}\.${octet}\.${octet}/(3[0-2]|[12][0-9]|[0-9])$"
+if [[ ! -r $CLIENT_CIDR_FILE ]]; then
+  fail "missing $CLIENT_CIDR_FILE"
+else
+  cidr_count=$(grep -cE "$cidr_re" "$CLIENT_CIDR_FILE" || true)
+  bad=$(grep -vE '^[[:space:]]*(#|$)' "$CLIENT_CIDR_FILE" | grep -vE "$cidr_re" || true)
+  if [[ -n $bad ]]; then
+    fail "$CLIENT_CIDR_FILE has lines that are not IPv4 CIDRs:"
+    printf '%s\n' "$bad"
+  elif (( cidr_count == 0 )); then
+    fail "$CLIENT_CIDR_FILE contains no IPv4 CIDRs"
+  else
+    note "ok   $CLIENT_CIDR_FILE is a pure IPv4 CIDR list ($cidr_count entries)"
+  fi
 fi
 
 if (( FAIL > 0 )); then

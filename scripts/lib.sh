@@ -79,9 +79,13 @@ apply_defaults() {
   : "${INSTALL_HIDDIFY:=1}"
   : "${HIDDIFY_INSTALL_URL:=https://i.hiddify.com/release}"
   : "${HARDEN_SSH:=0}"
+  : "${GOOGLE_IPV6_EGRESS:=0}"
+  : "${HE_SERVER_IPV4:=}"
+  : "${HE_CLIENT_IPV6:=}"
   export AWG_PORT TUNNEL_NET FOREIGN_TUNNEL_IP RU_TUNNEL_IP SOCKS_PORT AWG_MTU \
     SSH_PORT REALITY_SNI ENABLE_UFW ENABLE_FAIL2BAN AWG_ENABLE_S3S4 \
-    INSTALL_HIDDIFY HIDDIFY_INSTALL_URL HARDEN_SSH
+    INSTALL_HIDDIFY HIDDIFY_INSTALL_URL HARDEN_SSH \
+    GOOGLE_IPV6_EGRESS HE_SERVER_IPV4 HE_CLIENT_IPV6
 }
 
 # --------------------------------------------------------------- env files ---
@@ -319,6 +323,18 @@ write_if_changed() {
     rm -f "$tmp"
     TEMPLATE_CHANGED=1
   fi
+}
+
+# google_country [CURL_ARGS...]
+# Prints the lowercase country Google's own geo database assigns to the egress
+# address (the x-country header), or nothing. Third-party databases such as
+# ipinfo.io can disagree with Google, and Google's view is what Gemini enforces.
+google_country() {
+  curl -sS -o /dev/null -D - --max-time 15 "$@" \
+    'https://clientservices.googleapis.com/chrome-variations/seed?osname=win&channel=stable&milestone=140' \
+    2>/dev/null | tr -d '\r' \
+    | sed -nE 's/^x-country:[[:space:]]*([A-Za-z]+).*/\1/Ip' \
+    | tr '[:upper:]' '[:lower:]' || true
 }
 
 download_file() {
