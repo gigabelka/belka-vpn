@@ -48,6 +48,15 @@ if ! grep -q '\${FOREIGN_TUNNEL_IP}' config/foreign/awg0.conf.tpl; then
   fail "config/foreign/awg0.conf.tpl does not reference \${FOREIGN_TUNNEL_IP}"
 fi
 
+# The awg0 Address mask must follow TUNNEL_NET, not a hardcoded prefix.
+for tpl in config/foreign/awg0.conf.tpl config/ru/awg0.conf.tpl; do
+  if grep -Eq '^Address = \$\{[A-Z_]+_TUNNEL_IP\}/\$\{TUNNEL_PREFIX\}$' "$tpl"; then
+    note "ok   $tpl Address uses \${TUNNEL_PREFIX}"
+  else
+    fail "$tpl Address must be \${..._TUNNEL_IP}/\${TUNNEL_PREFIX}"
+  fi
+done
+
 # 4. No private keys or obvious secrets committed
 if grep -RIl --exclude-dir=.git -E 'BEGIN [A-Z ]*PRIVATE KEY' . >/dev/null 2>&1; then
   fail "private key material found in the repository"

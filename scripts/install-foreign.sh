@@ -88,6 +88,7 @@ EOF
 }
 
 render_foreign_awg() {
+  validate_tunnel_net
   export FOREIGN_TUNNEL_IP AWG_PORT AWG_MTU RU_TUNNEL_IP RU_PUBLIC_KEY
   export FOREIGN_PRIVATE_KEY OBF_LINES
   FOREIGN_PRIVATE_KEY=$(cat "$KEY_DIR/private.key")
@@ -190,7 +191,7 @@ summary_foreign() {
   [[ -n $RU_PUBLIC_KEY ]] && ru_peer=present
   cat >&3 <<EOF
 FOREIGN readiness
-  awg0:        ${FOREIGN_TUNNEL_IP}/24, UDP/${AWG_PORT} (RU peer: ${ru_peer})
+  awg0:        ${FOREIGN_TUNNEL_IP}/${TUNNEL_PREFIX}, UDP/${AWG_PORT} (RU peer: ${ru_peer})
   xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
   handoff:     /root/belka-foreign-handoff.env
 
@@ -245,6 +246,8 @@ main() {
     uninstall_foreign
     exit 0
   fi
+
+  validate_tunnel_net
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Xray, write $AWG_DIR/awg0.conf,"

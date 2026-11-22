@@ -1,5 +1,5 @@
 [Interface]
-Address = ${RU_TUNNEL_IP}/24
+Address = ${RU_TUNNEL_IP}/${TUNNEL_PREFIX}
 PrivateKey = ${RU_PRIVATE_KEY}
 MTU = ${AWG_MTU}
 ${OBF_LINES}

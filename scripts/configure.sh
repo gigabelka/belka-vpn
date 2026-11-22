@@ -189,6 +189,31 @@ ask_port() {
   done
 }
 
+ip_int() {
+  local -a o
+  IFS=. read -r -a o <<< "$1"
+  printf '%s\n' $(( (10#${o[0]} << 24) | (10#${o[1]} << 16) | (10#${o[2]} << 8) | 10#${o[3]} ))
+}
+
+# Same rules as validate_tunnel_net in lib.sh: CIDR /8../30, no host bits,
+# both tunnel IPs are host addresses inside it.
+check_tunnel_net() {
+  local net=${TUNNEL_NET%/*} prefix=${TUNNEL_NET##*/} net_i mask ip v
+  [[ $TUNNEL_NET == */* && $prefix =~ ^[0-9]{1,2}$ ]] && is_ipv4 "$net" \
+    || die "TUNNEL_NET must be CIDR like 172.16.0.0/24: $TUNNEL_NET"
+  prefix=$((10#$prefix))
+  (( prefix >= 8 && prefix <= 30 )) || die "TUNNEL_NET prefix must be /8../30: $TUNNEL_NET"
+  net_i=$(ip_int "$net")
+  mask=$(( (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
+  (( (net_i & mask) == net_i )) || die "TUNNEL_NET has host bits set: $TUNNEL_NET"
+  for v in FOREIGN_TUNNEL_IP RU_TUNNEL_IP; do
+    ip=$(ip_int "${!v}")
+    (( (ip & mask) == net_i )) || die "$v=${!v} is outside TUNNEL_NET=$TUNNEL_NET"
+    (( ip != net_i && ip != (net_i | (~mask & 0xFFFFFFFF)) )) \
+      || die "$v=${!v} is the network or broadcast address of $TUNNEL_NET"
+  done
+}
+
 ask_required_ip RU_PUBLIC_IP "Russian server public IP"
 ask_required_ip FOREIGN_PUBLIC_IP "Foreign server public IP"
 [[ $RU_PUBLIC_IP != "$FOREIGN_PUBLIC_IP" ]] \
@@ -200,6 +225,7 @@ ask_ipv4 FOREIGN_TUNNEL_IP "Foreign tunnel IP" "$FOREIGN_TUNNEL_IP"
 ask_ipv4 RU_TUNNEL_IP "RU tunnel IP" "$RU_TUNNEL_IP"
 [[ $FOREIGN_TUNNEL_IP != "$RU_TUNNEL_IP" ]] \
   || die "tunnel IPs must differ"
+check_tunnel_net
 ask_port SOCKS_PORT "SOCKS port on the foreign tunnel IP" "$SOCKS_PORT"
 ask_port SSH_PORT "SSH port" "$SSH_PORT"
 ask_value AWG_MTU "AmneziaWG MTU" "$AWG_MTU"

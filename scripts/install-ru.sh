@@ -154,6 +154,7 @@ EOF
 }
 
 render_ru_awg() {
+  validate_tunnel_net
   export RU_TUNNEL_IP RU_PRIVATE_KEY AWG_MTU OBF_LINES
   export FOREIGN_PUBLIC_KEY FOREIGN_PUBLIC_IP AWG_PORT FOREIGN_TUNNEL_IP
   RU_PRIVATE_KEY=$(cat "$KEY_DIR/private.key")
@@ -205,7 +206,7 @@ summary_ru() {
   fi
   cat >&3 <<EOF
 RU readiness
-  awg0:       ${RU_TUNNEL_IP}/24 -> ${FOREIGN_PUBLIC_IP}:${AWG_PORT}
+  awg0:       ${RU_TUNNEL_IP}/${TUNNEL_PREFIX} -> ${FOREIGN_PUBLIC_IP}:${AWG_PORT}
   handshake:  ${handshake}
   handoff:    /root/belka-ru-handoff.env
   checklist:  /root/belka-ru-manual-checklist.txt
@@ -289,6 +290,8 @@ EOF
   for v in AWG_JC AWG_JMIN AWG_JMAX AWG_S1 AWG_S2 AWG_H1 AWG_H2 AWG_H3 AWG_H4; do
     [[ -n ${!v:-} ]] || die "FOREIGN handoff missing $v"
   done
+  # The handoff may carry TUNNEL_NET and the tunnel IPs; validate the result.
+  validate_tunnel_net
 
   install_base_packages
   preflight_ru

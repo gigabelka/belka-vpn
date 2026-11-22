@@ -380,6 +380,40 @@ EOF
 
 # -------------------------------------------------------------- utilities ---
 
+ipv4_to_int() {
+  local ip=$1 a b c d
+  [[ $ip =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+  a=$((10#${BASH_REMATCH[1]})) b=$((10#${BASH_REMATCH[2]}))
+  c=$((10#${BASH_REMATCH[3]})) d=$((10#${BASH_REMATCH[4]}))
+  (( a <= 255 && b <= 255 && c <= 255 && d <= 255 )) || return 1
+  printf '%s\n' $(( (a << 24) | (b << 16) | (c << 8) | d ))
+}
+
+# Parse TUNNEL_NET (CIDR) and export TUNNEL_PREFIX for the awg0 templates.
+# Both tunnel IPs must be usable host addresses inside the network. Call it
+# after every source that may set TUNNEL_NET (env file, handoff).
+validate_tunnel_net() {
+  local net=${TUNNEL_NET%/*} prefix=${TUNNEL_NET##*/}
+  [[ $TUNNEL_NET == */* && $prefix =~ ^[0-9]{1,2}$ ]] \
+    || die "TUNNEL_NET must be CIDR like 172.16.0.0/24: $TUNNEL_NET"
+  prefix=$((10#$prefix))
+  (( prefix >= 8 && prefix <= 30 )) || die "TUNNEL_NET prefix must be /8../30: $TUNNEL_NET"
+  local net_i mask ip v
+  net_i=$(ipv4_to_int "$net") || die "TUNNEL_NET has an invalid address: $TUNNEL_NET"
+  mask=$(( (0xFFFFFFFF << (32 - prefix)) & 0xFFFFFFFF ))
+  (( (net_i & mask) == net_i )) \
+    || die "TUNNEL_NET has host bits set: $TUNNEL_NET"
+  for v in FOREIGN_TUNNEL_IP RU_TUNNEL_IP; do
+    ip=$(ipv4_to_int "${!v}") || die "$v is not a valid IPv4 address: ${!v}"
+    (( (ip & mask) == net_i )) || die "$v=${!v} is outside TUNNEL_NET=$TUNNEL_NET"
+    (( ip != net_i && ip != (net_i | (~mask & 0xFFFFFFFF)) )) \
+      || die "$v=${!v} is the network or broadcast address of $TUNNEL_NET"
+  done
+  [[ $FOREIGN_TUNNEL_IP != "$RU_TUNNEL_IP" ]] || die "tunnel IPs must differ"
+  TUNNEL_PREFIX=$prefix
+  export TUNNEL_PREFIX
+}
+
 check_tunnel_conflict() {
   if ip -4 route show | grep -Fq "$TUNNEL_NET" && ! ip link show awg0 >/dev/null 2>&1; then
     warn "route for $TUNNEL_NET already exists; check Docker/libvirt/LAN conflicts"
