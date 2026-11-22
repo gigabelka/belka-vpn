@@ -216,6 +216,7 @@ bash scripts/verify.sh --role foreign
 - handshake AmneziaWG свежий;
 - `curl --socks5-hostname 172.16.0.1:1080 https://api.ipify.org` → зарубежный IP;
 - YouTube через зарубежный сервер → 204;
+- `gemini.google.com` не показывает «недоступно в вашей стране»;
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
 - в клиенте `ipinfo.io` → российский IP, а YouTube/Google/Claude идут через зарубежный сервер.
 

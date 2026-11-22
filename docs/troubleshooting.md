@@ -96,6 +96,93 @@ curl -s -o /dev/null -w '%{http_code}\n' --socks5-hostname 172.16.0.1:1080 \
 - Claude Code на десктопе должен работать в TUN-режиме: SOCKS он не
   поддерживает. В WSL2/Docker TUN может не перехватываться.
 
+## Gemini: «недоступен в вашей стране»
+
+Симптом: `https://gemini.google.com/?hl=ru` показывает «Gemini пока не
+поддерживается в вашей стране». «YouTube работает» ничего не доказывает: YouTube
+доступен и напрямую из России, поэтому его трафик может идти через Direct. Параметр
+`hl=ru` меняет только язык интерфейса.
+
+**Важно:** Gemini проверяет не только IP, но и страну Google-аккаунта (регион
+аккаунта и платёжный профиль). Аккаунт с российской страной показывает блок даже
+через зарубежный IP. Быстрая проверка: откройте Gemini в чистом приватном окне
+**без входа** — если блок исчез, дело в аккаунте, а не в VPN. После подключения
+VPN обязательно перезагрузите вкладку: соединения, открытые до туннеля, идут
+напрямую.
+
+Сначала выясните, доходит ли домен до зарубежного сервера. На FOREIGN (поставьте
+`tcpdump`, если его нет) запустите захват и **затем** откройте новую приватную
+вкладку Gemini:
+
+```bash
+timeout 90 tcpdump -ni awg0 -s0 -A 'tcp dst port 1080' 2>/dev/null \
+  | grep -a --line-buffered -E 'gemini|google|\.com'
+```
+
+- виден `gemini.google.com` — маршрутизация работает, причина в exit-IP или аккаунте;
+- пакеты есть, но только IP (`05 01 00 01 ...`) — Xray не увидел SNI (ECH) или клиент
+  резолвил домен локально;
+- пакетов нет — Gemini идёт Direct.
+
+На RU сравните SOCKS и Direct и проверьте страну выхода:
+
+```bash
+curl -4 -sS -L --compressed --max-time 25 \
+  --socks5-hostname 172.16.0.1:1080 -o /tmp/gemini-socks.html \
+  -w '%{http_code} %{url_effective}\n' 'https://gemini.google.com/?hl=ru'
+curl -4 -sS -L --compressed --max-time 25 -o /tmp/gemini-direct.html \
+  -w '%{http_code} %{url_effective}\n' 'https://gemini.google.com/?hl=ru'
+
+grep -aoiE 'not available in your country|not available in your region|недоступен в вашей стране|не поддерживается в вашей стране' \
+  /tmp/gemini-socks.html /tmp/gemini-direct.html
+
+curl -4 -sS --max-time 10 --socks5-hostname 172.16.0.1:1080 https://ipinfo.io/country; echo
+curl -4 -sS --socks5-hostname 172.16.0.1:1080 https://ipinfo.io/json
+```
+
+Страница блокировки может отдаваться с кодом 200 и рисоваться JavaScript — отсутствие
+маркера не доказывает успех; ориентируйтесь на `url_effective`, `<title>` и браузер.
+
+Проверьте сгенерированный конфиг — Google должен быть в правиле на Socks-outbound:
+
+```bash
+jq -r '.routing.rules | to_entries[]
+  | select((.value.domain // []) | length > 0)
+  | "\(.key)\t\(.value.outboundTag)\t\(.value.domain | join(" "))"' \
+  /opt/hiddify-manager/generated/xray.json
+```
+
+Допустимо `google.com`, `domain:google.com`, `geosite:google`. Если есть только
+`full:google.com`, поддомены не покрыты — добавьте в Sites `domain:google.com`
+(или явные `gemini.google.com`, `aistudio.google.com`).
+
+Что делать:
+
+- **Не проксируется.** Панель: Common Proxy Core = Xray; Sites содержит `google.com`
+  (и Gemini-домены из `/root/belka-foreign-domains.txt`); Geosites — `geosite:google`
+  и `geosite:google-gemini`; WARP OFF; порядок FOREIGN-Domains → FOREIGN-Telegram-IP →
+  Direct; Apply. Списки в `/root` уже без комментариев: валидатор Hiddify не принимает
+  строки `#`. Клиент: IPv6 off, DNS remote `1.1.1.1`, Resolve Destination OFF, TUN.
+  В браузере отключите ECH и DoH (при ECH Xray не видит SNI). Очистите site data или
+  откройте приватное окно — кеш страницы блокировки переживает фикс.
+- **Проксируется, но Google блокирует exit-IP.** Проверьте `ipinfo.io/json` через
+  SOCKS: страну и `org`. Смените IP/подсеть у провайдера или сервер выхода.
+- **Проксируется, но блокируется аккаунт.** Проверьте страну аккаунта: нижний
+  колонтитул страницы Условий Google («Country Version») либо Play Store →
+  Settings → General → Account and device preferences → Country and profiles.
+  Исправление — [Google Country Association Form](https://policies.google.com/country-association-form);
+  изменения могут занять несколько дней, Play-регион меняется не чаще раза в год. Работает и аккаунт,
+  созданный через туннель в поддерживаемой стране (без российского телефона и
+  платёжного профиля). `verify.sh` проверяет только exit-IP — страну аккаунта он
+  не видит.
+- **Не делайте:** не добавляйте `geoip:google`; не правьте
+  `/opt/hiddify-manager/generated/xray.json` (перезапишется при Apply); не ставьте
+  WARP выше Socks.
+
+`ipinfo.io` в браузере не входит в список FOREIGN и покажет российский IP даже при
+рабочем туннеле. Чтобы проверить выход, временно добавьте `ipinfo.io` в Sites, нажмите
+Apply, посмотрите страну и уберите запись.
+
 ## Hiddify Manager не стартует / Xray падает
 
 ```bash

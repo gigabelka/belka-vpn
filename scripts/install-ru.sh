@@ -176,13 +176,24 @@ start_awg() {
   awg show >>"$LOG" 2>&1 || true
 }
 
+# Hiddify rejects '#' comments and blank lines in Sites/Geosites lists. The repo
+# files stay documented; /root gets paste-ready versions.
+write_rule_list() {
+  local src=$1 dst=$2 tmp
+  [[ -r $src ]] || die "rule list not found: $src"
+  tmp=$(mktemp)
+  grep -vE '^[[:space:]]*(#|$)' "$src" > "$tmp" || true
+  install -m 600 "$tmp" "$dst"
+  rm -f "$tmp"
+}
+
 write_checklist() {
   export FOREIGN_TUNNEL_IP SOCKS_PORT REALITY_SNI RU_PUBLIC_IP
   render_template "$SCRIPT_DIR/../config/ru/hiddify-checklist.txt.tpl" \
     /root/belka-ru-manual-checklist.txt 600
-  install -m 600 "$SCRIPT_DIR/../config/rules/foreign-domains.txt" /root/belka-foreign-domains.txt
-  install -m 600 "$SCRIPT_DIR/../config/rules/foreign-geosites.txt" /root/belka-foreign-geosites.txt
-  install -m 600 "$SCRIPT_DIR/../config/rules/foreign-telegram-ip.txt" /root/belka-foreign-telegram-ip.txt
+  write_rule_list "$SCRIPT_DIR/../config/rules/foreign-domains.txt" /root/belka-foreign-domains.txt
+  write_rule_list "$SCRIPT_DIR/../config/rules/foreign-geosites.txt" /root/belka-foreign-geosites.txt
+  write_rule_list "$SCRIPT_DIR/../config/rules/foreign-telegram-ip.txt" /root/belka-foreign-telegram-ip.txt
   log INFO "manual checklist: /root/belka-ru-manual-checklist.txt"
   cat /root/belka-ru-manual-checklist.txt >&3
 }

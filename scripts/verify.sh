@@ -93,7 +93,7 @@ check_hiddify_routing() {
 
   # Hiddify 14.x writes SOCKS endpoints as settings.address/port and tags them socks-<id>;
   # older layouts use settings.servers[0]. Support both.
-  local socks_count socks_tags tags_json tag domain_count telegram_count
+  local socks_count socks_tags tags_json tag domain_count google_count telegram_count
   local domain_idx telegram_idx
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
@@ -137,6 +137,20 @@ check_hiddify_routing() {
     ok "Hiddify routes domain/geosite lists to a SOCKS outbound"
   else
     bad "Hiddify has no domain/geosite rule pointing to a SOCKS outbound"
+  fi
+
+  # Google coverage guards Gemini/YouTube: accept the forms Hiddify emits for a
+  # bare site entry plus the geosite tag.
+  google_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "google.com" or . == "domain:google.com" or . == "full:google.com"
+              or . == "geosite:google")] | length' "$cfg")
+  if (( google_count > 0 )); then
+    ok "Hiddify routes google.com/geosite:google to a SOCKS outbound"
+  else
+    bad "Hiddify routes no google.com/geosite:google rule to a SOCKS outbound"
   fi
 
   telegram_count=$(jq --argjson tags "$tags_json" '
@@ -183,6 +197,33 @@ check_hiddify_routing() {
   else
     bad "Hiddify VLESS inbounds do not sniff SNI with routeOnly=false"
   fi
+}
+
+# Signed-out probe through FOREIGN: checks the exit IP, not Google account eligibility.
+check_gemini() {
+  local country code tmp
+  country=$(curl -4 -fsS --max-time 15 --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+    https://ipinfo.io/country 2>/dev/null | tr -d '[:space:]' || true)
+  case "$country" in
+    "") warn "Gemini: could not determine FOREIGN exit country (ipinfo.io)" ;;
+    RU) bad "Gemini: FOREIGN egress geolocates to Russia" ;;
+    *)  ok "Gemini: FOREIGN exit country is ${country}" ;;
+  esac
+
+  tmp=$(mktemp)
+  code=$(curl -4 -sS -L --compressed --max-time 25 \
+    -H 'Accept-Language: ru-RU,ru;q=0.9,en;q=0.8' \
+    --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+    -o "$tmp" -w '%{http_code}' \
+    'https://gemini.google.com/?hl=ru' 2>/dev/null || true)
+  if grep -aEqi 'not available in your country|not available in your region|недоступен в вашей стране|не поддерживается в вашей стране' "$tmp"; then
+    warn "Gemini shows a region-block page via FOREIGN (check exit IP/account country)"
+  elif [[ $code == 2* || $code == 3* ]]; then
+    ok "Gemini via FOREIGN returns ${code} (exit-level check, no region marker)"
+  else
+    warn "Gemini via FOREIGN returned ${code:-no response}; check manually"
+  fi
+  rm -f "$tmp"
 }
 
 check_foreign() {
@@ -248,6 +289,8 @@ check_ru() {
     403) bad "Anthropic returns 403: the exit is still blocked or not FOREIGN" ;;
     *) warn "Anthropic returned ${code:-no response}; check manually" ;;
   esac
+
+  check_gemini
 
   if systemctl list-units --type=service --state=running 'hiddify*' --no-legend 2>/dev/null | grep -q .; then
     ok "Hiddify services are running"

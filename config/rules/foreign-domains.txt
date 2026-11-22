@@ -33,6 +33,20 @@ ytimg.com
 ggpht.com
 googlesource.com
 
+# Google AI / Gemini and sign-in
+# google.com/googleapis.com already cover the Google-hosted names below; they are
+# listed explicitly in case Hiddify stores Sites as exact matches.
+ai.google
+labs.google
+deepmind.google
+deepmind.com
+recaptcha.net
+gemini.google.com
+aistudio.google.com
+notebooklm.google.com
+generativelanguage.googleapis.com
+content-push.googleapis.com
+
 # Telegram domains (IP ranges go to FOREIGN-Telegram-IP)
 telegram.org
 telegram.me

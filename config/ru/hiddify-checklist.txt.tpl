@@ -35,6 +35,8 @@ Reality SNI candidate: ${REALITY_SNI}
       Username/Password: empty
       Sites: copy /root/belka-foreign-domains.txt
       Geosites/GeoIPs (xray): copy /root/belka-foreign-geosites.txt
+      (both /root lists are paste-ready: no comments, no blank lines)
+      google.com covers gemini.google.com and aistudio.google.com
       Domestic sites of Iran/Russia: OFF
       Rule-sets (hiddify-core): empty (Common Proxy Core = Xray)
       *** Do NOT add geoip:google here. ***
@@ -71,10 +73,13 @@ Reality SNI candidate: ${REALITY_SNI}
    - IPv6: Disabled
    - DNS: remote 1.1.1.1 via proxy
    - Resolve Destination: OFF
+   - Browser: ECH and DoH disabled (otherwise Xray cannot see SNI)
    - On desktop use TUN/VPN mode (Claude Code does not support SOCKS)
 
 9) Tests
    - youtube.com, google.com, claude.ai -> through FOREIGN
+   - gemini.google.com opens without "not available in your country"
+     (signed out; an account with RU country stays blocked by account country)
    - Russian sites -> Direct (RU IP)
    - api.anthropic.com returns 401/400/405, not 403 region
    - Telegram messages work (calls may use UDP; verify separately)

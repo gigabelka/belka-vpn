@@ -185,7 +185,7 @@ bash scripts/verify.sh --role foreign
 
 1. `https://ipinfo.io` → российский IP.
 2. Временно добавить `ipinfo.io` в `Sites` outbound FOREIGN-Domains → зарубежный IP; убрать.
-3. YouTube/Google/Claude/Telegram работают; российские сайты идут Direct.
+3. YouTube/Google/Claude/Telegram/Gemini работают; российские сайты идут Direct.
 4. `api.anthropic.com` — не 403.
 5. DNS/IPv6 leak-тесты.
 6. Claude Code в TUN-режиме.
