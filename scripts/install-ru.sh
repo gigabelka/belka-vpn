@@ -20,6 +20,7 @@ HANDOFF_IN=""
 KEYS_ONLY=0
 UNINSTALL=0
 DRY_RUN=0
+HIDDIFY_CORE_COMPAT_CHANGED=0
 
 usage() {
   cat <<'EOF'
@@ -61,13 +62,45 @@ preflight_ru() {
   fi
 }
 
+hiddify_core_compat_dropin() {
+  local dst=/etc/systemd/system/hiddify-core.service.d/belka-compat.conf
+  install -d -m 755 "$(dirname "$dst")"
+  write_if_changed "$dst" 644 <<'EOF'
+# belka-vpn: Hiddify Manager's generated config uses remote rule-sets with an
+# implicit default HTTP client; newer sing-box cores abort on it unless this
+# deprecated behaviour is allowed. Revisit when Hiddify emits the new form.
+[Service]
+Environment=ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true
+EOF
+  if (( TEMPLATE_CHANGED )); then
+    HIDDIFY_CORE_COMPAT_CHANGED=1
+  fi
+}
+
+activate_hiddify_core_compat() {
+  [[ -d /opt/hiddify-manager ]] || return 0
+  systemctl daemon-reload >>"$LOG" 2>&1 || true
+  if (( HIDDIFY_CORE_COMPAT_CHANGED )) || ! systemctl is-active -q hiddify-core; then
+    systemctl restart hiddify-core >>"$LOG" 2>&1 \
+      || warn "hiddify-core restart failed; see journalctl -u hiddify-core and /opt/hiddify-manager/data/log/hiddify-core.err.log"
+    log INFO "hiddify-core restarted"
+  else
+    log INFO "hiddify-core compatibility drop-in unchanged and service active"
+  fi
+}
+
 install_hiddify() {
   if [[ ${INSTALL_HIDDIFY:-1} != 1 ]]; then
     log INFO "Hiddify Manager install disabled by env"
     return 0
   fi
+  # Write the drop-in before the installer so its health check sees a working
+  # hiddify-core: newer sing-box cores abort on Hiddify's deprecated implicit
+  # default HTTP client for remote rule-sets.
+  hiddify_core_compat_dropin
   if [[ -d /opt/hiddify-manager ]]; then
     log INFO "Hiddify Manager already installed"
+    activate_hiddify_core_compat
     return 0
   fi
 
@@ -86,9 +119,11 @@ install_hiddify() {
   ( umask 022; TERM=xterm DEBIAN_FRONTEND=noninteractive \
       bash "$installer" </dev/null >"$out" 2>&1 ) || rc=$?
   if (( rc != 0 )); then
-    # WARP (usque) registration is often unreachable from Russia and returns
-    # non-zero even though the panel finished. Treat that as success only when
-    # the panel really is installed; we keep WARP off in this deployment.
+    # The installer can exit non-zero for non-fatal reasons: WARP (usque)
+    # registration is often unreachable from Russia, and the sing-box core it
+    # pulls aborts on Hiddify's implicit default HTTP client for remote
+    # rule-sets until the drop-in above is loaded. Treat it as success only
+    # when the panel really is installed; WARP stays off in this deployment.
     if [[ -f /opt/hiddify-manager/data/hiddify-panel/app.cfg ]] \
       && systemctl is-enabled -q hiddify-panel 2>/dev/null; then
       warn "Hiddify installer exited $rc but the panel is installed (likely WARP registration); continuing"
@@ -99,6 +134,10 @@ install_hiddify() {
     fi
   fi
   [[ -d /opt/hiddify-manager ]] || die "Hiddify install finished but /opt/hiddify-manager is missing"
+  # Re-assert in case the installer replaced the unit directory, then load the
+  # compatibility environment.
+  hiddify_core_compat_dropin
+  activate_hiddify_core_compat
   log INFO "Hiddify Manager installed; admin link: run 'hiddify admin' on the server"
   log INFO "installer output saved to $out (0600, contains the admin link)"
 }
@@ -197,8 +236,8 @@ main() {
   fi
 
   if (( DRY_RUN )); then
-    log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write $AWG_DIR/awg0.conf,"
-    log INFO "dry-run: start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT and print the manual checklist"
+    log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write the hiddify-core compatibility drop-in,"
+    log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT and print the manual checklist"
     exit 0
   fi
 

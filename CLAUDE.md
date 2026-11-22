@@ -120,6 +120,10 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 
 - Hiddify Manager overwrites its generated Xray config on "Apply now". Change routing only
   through the panel UI; never edit its generated files.
+- Newer sing-box cores pulled by the Hiddify installer abort on Hiddify's implicit default
+  HTTP client for remote rule-sets (`status=1` every 5 s). `install-ru.sh` installs a
+  `hiddify-core.service` drop-in with `ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true`;
+  without it the core crash-loops. Remove the drop-in once Hiddify emits the new config form.
 - `Jmax` must not exceed MTU (start at 1280; drop to 1240 on fragmentation). Obfuscation
   parameters must match on both peers, and after rotation **both** handoffs must be
   re-exchanged or the handshake stops. `AWG_ENABLE_S3S4=0` is the safe default.

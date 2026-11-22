@@ -12,6 +12,9 @@ Reality SNI candidate: ${REALITY_SNI}
    - Country: Russia
    - Protocols: VLESS only (disable Hysteria2/TUIC/Shadowsocks/etc.)
    - Domains: no domain -> use the server IP (self-signed)
+   NOTE: hiddify-core runs with a compatibility environment. Until you finish
+   this checklist and press Apply, its default non-VLESS inbounds may be
+   listening. Configure and Apply promptly.
 
 2) Settings -> Settings -> Advanced
    - Common Proxy Core = Xray          <-- REQUIRED for geosite/geoip and SNI rewrite

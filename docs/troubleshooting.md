@@ -111,6 +111,13 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
   отсутствовать в вашей версии). Уберите тег, оставьте домены.
 - **Порядок outbounds**: WARP/Block выше Socks перехватывают трафик. WARP
   выключить, Block — без списков.
+- **`hiddify-core` перезапускается каждые 5 секунд** (`status=1`, journal
+  пуст): смотрите `/opt/hiddify-manager/data/log/hiddify-core.err.log`. Если
+  там `implicit default HTTP client ... deprecated`, новое ядро sing-box
+  требует `ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true`.
+  `install-ru.sh` ставит drop-in
+  `/etc/systemd/system/hiddify-core.service.d/belka-compat.conf`; вручную:
+  `systemctl daemon-reload && systemctl restart hiddify-core`.
 - **Правка сгенерированных файлов**: Hiddify перезаписывает их при Apply.
   Меняйте только через UI.
 - **Порты 80/443 заняты**: Hiddify нужны оба; освободите или не устанавливайте
@@ -165,7 +172,9 @@ bash scripts/verify.sh
 - `/var/log/belka-vpn-foreign.log`, `/var/log/belka-vpn-ru.log`,
   `/var/log/belka-vpn-verify.log`;
 - `/var/log/belka-vpn-bootstrap.log`;
-- `journalctl -u awg-quick@awg0`, `-u xray`, `-u hiddify-*`.
+- `journalctl -u awg-quick@awg0`, `-u xray`, `-u hiddify-*`;
+- `/opt/hiddify-manager/data/log/hiddify-core.{out,err}.log` — stdout/stderr
+  `hiddify-core` (unit пишет их в файлы, а не в journal).
 
 В логах нет приватных ключей и admin-ссылки Hiddify. Installer output с
 admin-ссылкой — `/root/belka-hiddify-install.out` (0600).
