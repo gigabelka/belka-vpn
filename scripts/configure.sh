@@ -133,8 +133,14 @@ ask_required_ip() {
       warn "0.0.0.0 is not a server address"
       continue
     fi
+    # A private/loopback/CGNAT address cannot be the peer's public endpoint,
+    # and FOREIGN's UFW rule would admit the wrong source.
     if is_private_ip "$value"; then
-      warn "$label $value is in a private/loopback range"
+      if (( NON_INTERACTIVE )); then
+        die "$var must be a public IPv4 address, not private/loopback/CGNAT: $value"
+      fi
+      warn "$value is a private/loopback/CGNAT address; enter the public IPv4"
+      continue
     fi
     printf -v "$var" '%s' "$value"
     return 0
