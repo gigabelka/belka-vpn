@@ -122,6 +122,136 @@ start_awg() {
   awg show >>"$LOG" 2>&1 || true
 }
 
+# ------------------------------------------------- IPv6 egress for Google ---
+# Google's own geo database can place the FOREIGN IPv4 in Russia even when every
+# third-party database says otherwise; Gemini then refuses signed-in users.
+# GOOGLE_IPV6_EGRESS=1 sends Google domains out over IPv6 instead: the server's
+# native IPv6, or a Hurricane Electric 6in4 tunnel when HE_SERVER_IPV4 and
+# HE_CLIENT_IPV6 are set.
+
+HE_UNIT=/etc/systemd/system/belka-he-ipv6.service
+
+validate_google_ipv6() {
+  [[ $GOOGLE_IPV6_EGRESS == 0 || $GOOGLE_IPV6_EGRESS == 1 ]] \
+    || die "GOOGLE_IPV6_EGRESS must be 0 or 1"
+  if [[ -n $HE_SERVER_IPV4 || -n $HE_CLIENT_IPV6 ]]; then
+    [[ $HE_SERVER_IPV4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+      || die "HE_SERVER_IPV4 must be the tunnel server IPv4 (tunnelbroker.net: Server IPv4 Address)"
+    [[ $HE_CLIENT_IPV6 =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] \
+      || die "HE_CLIENT_IPV6 must be an IPv6 address with prefix (tunnelbroker.net: Client IPv6 Address)"
+  fi
+}
+
+he_tunnel_wanted() { [[ $GOOGLE_IPV6_EGRESS == 1 && -n $HE_SERVER_IPV4 ]]; }
+
+# Tunnel server of the installed unit, so a changed or cleared env can still
+# remove the old UFW rule.
+installed_he_server() {
+  [[ -r $HE_UNIT ]] || return 0
+  sed -nE '/ remote /{s/.* remote ([0-9.]+) .*/\1/p;q}' "$HE_UNIT"
+}
+
+delete_he_ufw_rule() {
+  local server=$1
+  [[ -n $server && ${ENABLE_UFW:-1} == 1 ]] || return 0
+  ufw --force delete allow proto ipv6 from "$server" >>"$LOG" 2>&1 || true
+}
+
+remove_he_tunnel() {
+  [[ -e $HE_UNIT ]] || return 0
+  local old
+  old=$(installed_he_server)
+  systemctl disable --now belka-he-ipv6 >>"$LOG" 2>&1 || true
+  rm -f "$HE_UNIT"
+  systemctl daemon-reload
+  delete_he_ufw_rule "$old"
+  log INFO "HE IPv6 tunnel removed"
+}
+
+setup_google_ipv6() {
+  if [[ $GOOGLE_IPV6_EGRESS != 1 ]]; then
+    remove_he_tunnel
+    return 0
+  fi
+
+  if he_tunnel_wanted; then
+    local old
+    old=$(installed_he_server)
+    [[ $old == "$HE_SERVER_IPV4" ]] || delete_he_ufw_rule "$old"
+    export FOREIGN_PUBLIC_IP HE_SERVER_IPV4 HE_CLIENT_IPV6
+    render_template "$SCRIPT_DIR/../config/foreign/he-ipv6.service.tpl" "$HE_UNIT" 644
+    systemctl daemon-reload
+    systemctl enable belka-he-ipv6 >>"$LOG" 2>&1 || true
+    if (( TEMPLATE_CHANGED )) || ! systemctl is-active -q belka-he-ipv6; then
+      systemctl restart belka-he-ipv6 >>"$LOG" 2>&1 \
+        || die "belka-he-ipv6 failed; check: journalctl -u belka-he-ipv6 -n 50"
+      log INFO "HE IPv6 tunnel (re)started"
+    else
+      log INFO "HE IPv6 tunnel unchanged and active"
+    fi
+  else
+    remove_he_tunnel
+  fi
+
+  if ! grep -q . <<< "$(ip -6 route show default 2>/dev/null)"; then
+    die "GOOGLE_IPV6_EGRESS=1 but there is no IPv6 default route (set HE_SERVER_IPV4/HE_CLIENT_IPV6 or get native IPv6 from the provider)"
+  fi
+
+  # Xray will force IPv6 for Google, so refuse to switch it over a dead path.
+  local code="" i
+  for i in 1 2 3; do
+    code=$(curl -6 -sS -o /dev/null -w '%{http_code}' --max-time 15 \
+      https://www.google.com/generate_204 2>/dev/null || true)
+    [[ $code == 204 ]] && break
+    sleep 3
+  done
+  [[ $code == 204 ]] \
+    || die "IPv6 egress to Google failed (generate_204 returned ${code:-no response}); Xray config left unchanged"
+
+  local country
+  country=$(google_country -6)
+  case "$country" in
+    ru) warn "Google still geolocates the IPv6 egress as RU; Gemini will stay blocked" ;;
+    "") warn "IPv6 egress works, but Google's country could not be read" ;;
+    *) log INFO "IPv6 egress to Google works; Google sees country: $country" ;;
+  esac
+}
+
+# Fragments spliced into xray-socks.json.tpl; empty unless GOOGLE_IPV6_EGRESS=1,
+# so the default render is byte-identical to the plain template.
+xray_google_v6_fragments() {
+  XRAY_EXTRA_OUTBOUNDS=""
+  XRAY_EXTRA_RULES=""
+  [[ $GOOGLE_IPV6_EGRESS == 1 ]] || return 0
+  XRAY_EXTRA_OUTBOUNDS=$(cat <<'EOF'
+,
+    {
+      "tag": "google-v6",
+      "protocol": "freedom",
+      "settings": {
+        "domainStrategy": "ForceIPv6"
+      }
+    }
+EOF
+)
+  # YouTube stays on IPv4: video would saturate a tunnel, and the region block
+  # this works around is enforced by Gemini, not YouTube.
+  XRAY_EXTRA_RULES=$(cat <<'EOF'
+,
+      {
+        "type": "field",
+        "domain": ["geosite:youtube"],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "domain": ["geosite:google", "geosite:google-gemini"],
+        "outboundTag": "google-v6"
+      }
+EOF
+)
+}
+
 install_xray() {
   if [[ ! -x /usr/local/bin/xray ]]; then
     local installer=/root/.cache/belka/xray-install.sh
@@ -134,7 +264,8 @@ install_xray() {
 }
 
 render_xray() {
-  export FOREIGN_TUNNEL_IP SOCKS_PORT
+  xray_google_v6_fragments
+  export FOREIGN_TUNNEL_IP SOCKS_PORT XRAY_EXTRA_OUTBOUNDS XRAY_EXTRA_RULES
   render_template "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
     /usr/local/etc/xray/config.json 644
   local cfg_changed=$TEMPLATE_CHANGED
@@ -180,6 +311,9 @@ setup_firewall_foreign() {
   ufw_allow from "$RU_PUBLIC_IP" to any port "$AWG_PORT" proto udp
   ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto tcp
   ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto udp
+  if he_tunnel_wanted; then
+    ufw_allow proto ipv6 from "$HE_SERVER_IPV4"
+  fi
   ufw --force enable >>"$LOG" 2>&1
   ufw status verbose >>"$LOG" 2>&1 || true
   log INFO "UFW enabled: SSH, UDP/$AWG_PORT from $RU_PUBLIC_IP, SOCKS only on awg0"
@@ -193,6 +327,7 @@ summary_foreign() {
 FOREIGN readiness
   awg0:        ${FOREIGN_TUNNEL_IP}/${TUNNEL_PREFIX}, UDP/${AWG_PORT} (RU peer: ${ru_peer})
   xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
+  google ipv6: $( [[ $GOOGLE_IPV6_EGRESS == 1 ]] && echo "on${HE_SERVER_IPV4:+ (HE tunnel)}" || echo off )
   handoff:     /root/belka-foreign-handoff.env
 
 EOF
@@ -220,6 +355,7 @@ uninstall_foreign() {
   log INFO "uninstalling FOREIGN components (packages and keys are kept)"
   systemctl disable --now xray 2>/dev/null || true
   rm -f /etc/systemd/system/xray.service.d/10-awg.conf
+  remove_he_tunnel
   systemctl daemon-reload || true
   systemctl disable --now awg-quick@awg0 2>/dev/null || true
   rm -f "$AWG_DIR/awg0.conf"
@@ -248,10 +384,17 @@ main() {
   fi
 
   validate_tunnel_net
+  validate_google_ipv6
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Xray, write $AWG_DIR/awg0.conf,"
     log INFO "dry-run: open UDP/$AWG_PORT from $RU_PUBLIC_IP and TCP+UDP/$SOCKS_PORT on awg0"
+    if he_tunnel_wanted; then
+      log INFO "dry-run: would bring up HE 6in4 tunnel to $HE_SERVER_IPV4 ($HE_CLIENT_IPV6) and allow proto 41 from it"
+    fi
+    if [[ $GOOGLE_IPV6_EGRESS == 1 ]]; then
+      log INFO "dry-run: would route geosite:google over IPv6 (outbound google-v6, ForceIPv6)"
+    fi
     exit 0
   fi
 
@@ -276,6 +419,7 @@ main() {
   write_foreign_handoff
   render_foreign_awg
   start_awg
+  setup_google_ipv6
   install_xray
   render_xray
   start_xray

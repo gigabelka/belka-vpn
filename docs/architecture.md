@@ -71,6 +71,25 @@ Settings → Settings → Advanced Settings → Common Proxy Core = Xray
 
 Так YouTube/Google не получают российские GGC-адреса, а `api.anthropic.com` видит зарубежный выход.
 
+## IPv6-выход для Google (опция)
+
+Собственная геобаза Google может считать IPv4 зарубежного сервера российским, даже
+когда RIPE и сторонние базы показывают другую страну. Gemini проверяет именно её.
+С `GOOGLE_IPV6_EGRESS=1` на FOREIGN появляется outbound `google-v6` (`freedom`,
+`ForceIPv6`) и правила: `geosite:youtube` → `direct` (IPv4), затем `geosite:google` и
+`geosite:google-gemini` → `google-v6`. Домен приходит на FOREIGN в SOCKS-запросе, поэтому
+sniffing там не нужен.
+
+- `ForceIPv6`, а не `UseIPv6v4`: если IPv6 пропал, запрос к Google падает, а не уходит
+  молча с IPv4, который Google считает российским.
+- YouTube остаётся на IPv4: видео упёрлось бы в пропускную способность туннеля, а
+  региональную блокировку применяет Gemini, не YouTube.
+- Без нативного IPv6 используется туннель 6in4 Hurricane Electric
+  (`belka-he-ipv6.service`, `ip tunnel … mode sit`). Netplan не трогаем: `netplan apply`
+  на удалённом сервере может уронить сеть и `awg0`.
+- При выключенной опции конфиг Xray совпадает с прежним байт в байт, поэтому лишних
+  перезапусков нет.
+
 ## Безопасность
 
 - Приватные ключи AWG — только на своих серверах, `0600`.

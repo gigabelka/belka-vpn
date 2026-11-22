@@ -67,6 +67,7 @@ for tpl in \
   config/foreign/awg0.conf.tpl \
   config/foreign/awg0-peer.tpl \
   config/foreign/xray-socks.json.tpl \
+  config/foreign/he-ipv6.service.tpl \
   config/ru/awg0.conf.tpl \
   config/ru/hiddify-checklist.txt.tpl; do
   if [[ -r $tpl ]]; then
