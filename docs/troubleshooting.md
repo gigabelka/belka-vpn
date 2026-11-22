@@ -165,8 +165,27 @@ jq -r '.routing.rules | to_entries[]
   строки `#`. Клиент: IPv6 off, DNS remote `1.1.1.1`, Resolve Destination OFF, TUN.
   В браузере отключите ECH и DoH (при ECH Xray не видит SNI). Очистите site data или
   откройте приватное окно — кеш страницы блокировки переживает фикс.
-- **Проксируется, но Google блокирует exit-IP.** Проверьте `ipinfo.io/json` через
-  SOCKS: страну и `org`. Смените IP/подсеть у провайдера или сервер выхода.
+- **Проксируется, но Google блокирует exit-IP.** Сторонние базы (`ipinfo.io`,
+  Cloudflare) могут показывать зарубежную страну, а собственная геобаза Google — Россию.
+  Смотрите страну глазами Google (на RU):
+
+  ```bash
+  S='--socks5-hostname 172.16.0.1:1080'
+  curl -4 -sS -o /dev/null -D - $S \
+    'https://clientservices.googleapis.com/chrome-variations/seed?osname=win&channel=stable&milestone=140' \
+    | grep -i '^x-country'
+  curl -4 -sS $S -A 'Mozilla/5.0 Chrome/140.0' 'https://www.youtube.com/?hl=en' \
+    | grep -oE '"INNERTUBE_CONTEXT_GL":"[A-Z]{2}"' | head -1
+  ```
+
+  `ru` / `"RU"` — Google считает exit-IP российским. Типичный признак: Gemini без входа
+  открывается, со входом — «не поддерживается в вашей стране». Браузер, кеш, политики
+  Chrome и маршрутизация тут ни при чём. Смените IP/подсеть или хостера сервера выхода
+  либо попросите хостера исправить geofeed для Google (дни–недели). Cloudflare WARP
+  на FOREIGN не помогает: выход WARP через Хельсинки Google тоже считает `ru`.
+  Новый IP проверяйте этими же командами до переезда.
+  Проверяя «работает ли» в другом профиле или `--user-data-dir`, убедитесь, что вход
+  действительно выполнен: cookies из скопированного профиля Chrome не расшифровываются.
 - **Проксируется, но блокируется аккаунт.** Проверьте страну аккаунта: нижний
   колонтитул страницы Условий Google («Country Version») либо Play Store →
   Settings → General → Account and device preferences → Country and profiles.
