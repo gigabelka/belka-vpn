@@ -43,6 +43,9 @@ bash -n scripts/lib.sh      # single-file syntax check
 `tests/lint.sh` runs `bash -n` on all scripts, `shellcheck -S error` when installed,
 required-template checks, secret scans, `.gitignore` coverage, the public-IPv4 allowlist,
 and the ban on legacy `fi*` / Finnish names and on the old setup-script filenames.
+Content scans cover only git-visible files (tracked plus untracked-not-ignored), so
+gitignored runtime files such as `env/` or `.env` are skipped. In a copy without `.git`
+(the tar copy on the servers) they scan every file.
 
 Deployment (as root, Ubuntu 22.04/24.04, repo at `/opt/belka-vpn`):
 
@@ -65,9 +68,6 @@ directly instead of via a handoff file. `bootstrap.sh` consumes the role word, `
 (default `main`), `--env-file` and `-h`; other arguments, and everything after `--`, are
 forwarded to the selected installer. It requires an existing env file and immediately
 runs the installer.
-
-Keep `configure.sh` output outside the repo: `tests/lint.sh` greps the whole working tree,
-gitignored files included, so generated env files with real IPs make it fail.
 
 ## Architecture
 

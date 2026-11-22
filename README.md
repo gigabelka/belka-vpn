@@ -109,7 +109,7 @@ bash scripts/configure.sh --role foreign   # пишет /etc/belka-vpn/foreign.e
 bash scripts/configure.sh --role ru        # пишет /etc/belka-vpn/ru.env
 ```
 
-Вариант Б — локально, затем скопировать оба файла. Каталог вывода — вне репозитория: `tests/lint.sh` сканирует и gitignored-файлы и упадёт на реальных IP.
+Вариант Б — локально, затем скопировать оба файла. Подойдёт и `./env` внутри репозитория: он в `.gitignore`, и `tests/lint.sh` игнорируемые файлы не сканирует.
 
 ```bash
 bash scripts/configure.sh --role both --output-dir ~/belka-env

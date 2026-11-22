@@ -10,6 +10,28 @@ FAIL=0
 note() { printf '%s\n' "$*"; }
 fail() { printf 'FAIL: %s\n' "$*"; FAIL=1; }
 
+# Files the content scans look at: tracked plus untracked-but-not-ignored, so
+# gitignored runtime files (generated env/, .env, handoffs) never trip the
+# checks. Without git metadata (tar copy on a server) fall back to every file.
+SCAN_FILES=()
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  while IFS= read -r -d '' f; do
+    [[ -f $f ]] && SCAN_FILES+=("$f")
+  done < <(git ls-files -z --cached --others --exclude-standard)
+  note "ok   scanning ${#SCAN_FILES[@]} git-visible files (ignored files skipped)"
+else
+  while IFS= read -r -d '' f; do
+    SCAN_FILES+=("$f")
+  done < <(find . -path ./.git -prune -o -type f -print0)
+  note "note no git metadata: scanning all ${#SCAN_FILES[@]} files"
+fi
+
+# grep over SCAN_FILES; extra grep options come first.
+scan_grep() {
+  (( ${#SCAN_FILES[@]} )) || return 1
+  grep -I "$@" -- "${SCAN_FILES[@]}"
+}
+
 # 1. Bash syntax
 for f in scripts/*.sh tests/*.sh; do
   if bash -n "$f"; then
@@ -58,13 +80,13 @@ for tpl in config/foreign/awg0.conf.tpl config/ru/awg0.conf.tpl; do
 done
 
 # 4. No private keys or obvious secrets committed
-if grep -RIl --exclude-dir=.git -E 'BEGIN [A-Z ]*PRIVATE KEY' . >/dev/null 2>&1; then
+if scan_grep -l -E 'BEGIN [A-Z ]*PRIVATE KEY' >/dev/null 2>&1; then
   fail "private key material found in the repository"
 else
   note "ok   no private key material"
 fi
 
-if grep -RIl --exclude-dir=.git -E '^PrivateKey[[:space:]]*=[[:space:]]*[A-Za-z0-9+/=]{40,}' . >/dev/null 2>&1; then
+if scan_grep -l -E '^PrivateKey[[:space:]]*=[[:space:]]*[A-Za-z0-9+/=]{40,}' >/dev/null 2>&1; then
   fail "rendered WireGuard/AmneziaWG private key found in the repository"
 else
   note "ok   no rendered AmneziaWG private keys"
@@ -93,8 +115,8 @@ else
   fail "scripts/configure.sh is not executable"
 fi
 
-if grep -RIn --exclude-dir=.git --exclude='lint.sh' -E \
-  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|foreign-setup\.sh|ru-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi|socks-fi\b' .; then
+if scan_grep -n --exclude='lint.sh' -E \
+  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|foreign-setup\.sh|ru-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi|socks-fi\b'; then
   fail "legacy FI names found (see lines above)"
 else
   note "ok   no legacy FI names"
@@ -126,7 +148,7 @@ allowed_ipv4() {
 }
 
 mapfile -t ipv4 < <(
-  grep -RhoE --exclude-dir=.git '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' . 2>/dev/null | sort -u
+  scan_grep -hoE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' 2>/dev/null | sort -u
 )
 ipv4_bad=0
 for ip in "${ipv4[@]}"; do
