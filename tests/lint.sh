@@ -71,10 +71,10 @@ for pattern in '.env' '*.key' '*handoff*.env'; do
 done
 
 # 6. Generic naming: no FI-specific paths or terms
-for p in scripts/fi-setup.sh scripts/env/fi.env.example config/fi; do
+for p in scripts/fi-setup.sh scripts/foreign-setup.sh scripts/ru-setup.sh scripts/env/fi.env.example config/fi; do
   [[ ! -e $p ]] || fail "legacy path exists: $p"
 done
-for p in scripts/foreign-setup.sh scripts/env/foreign.env.example config/foreign; do
+for p in scripts/install-foreign.sh scripts/install-ru.sh scripts/env/foreign.env.example config/foreign; do
   [[ -e $p ]] || fail "missing expected path: $p"
 done
 
@@ -85,7 +85,7 @@ else
 fi
 
 if grep -RIn --exclude-dir=.git --exclude='lint.sh' -E \
-  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi' .; then
+  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|foreign-setup\.sh|ru-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi' .; then
   fail "legacy FI names found (see lines above)"
 else
   note "ok   no legacy FI names"

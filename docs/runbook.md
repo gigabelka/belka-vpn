@@ -70,7 +70,7 @@ install -m 600 scripts/env/ru.env.example /etc/belka-vpn/ru.env
 ## 3. Зарубежный сервер: первый проход
 
 ```bash
-bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
+bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 ```
 
 Что делает:
@@ -93,7 +93,7 @@ ufw status verbose
 ## 4. Россия: ключи
 
 ```bash
-bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
+bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
 ```
 
 Скрипт устанавливает AmneziaWG, генерирует ключи RU, пишет
@@ -109,7 +109,7 @@ scp -i <key> belka-ru-handoff.env root@<FOREIGN_IP>:/root/belka-ru-handoff.env
 На зарубежном сервере:
 
 ```bash
-bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 awg show     # ожидается свежий handshake и растущий transfer
 ```
 
@@ -123,7 +123,7 @@ scp -i <key> belka-foreign-handoff.env root@<RU_IP>:/root/belka-foreign-handoff.
 На РФ:
 
 ```bash
-bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
 Порядок внутри скрипта: Hiddify Manager → AmneziaWG `awg0` → RU handoff →
@@ -198,9 +198,9 @@ bash scripts/verify.sh --role foreign
 
 ```bash
 # зарубежный сервер
-ROTATE_KEYS=1 ROTATE_OBFUSCATION=1 bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
+ROTATE_KEYS=1 ROTATE_OBFUSCATION=1 bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 # передать новый handoff на RU, затем
-ROTATE_KEYS=1 bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+ROTATE_KEYS=1 bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
 После ротации обфускации обязательно обновите handoff на обеих сторонах,
@@ -209,8 +209,8 @@ ROTATE_KEYS=1 bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
 ## 11. Откат
 
 ```bash
-bash scripts/foreign-setup.sh --uninstall
-bash scripts/ru-setup.sh --uninstall
+bash scripts/install-foreign.sh --uninstall
+bash scripts/install-ru.sh --uninstall
 ```
 
 Hiddify Manager удаляется отдельно:

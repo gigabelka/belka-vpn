@@ -37,27 +37,27 @@ bash -n scripts/lib.sh      # single-file syntax check
 
 `tests/lint.sh` runs `bash -n` on all scripts, `shellcheck -S error` when installed,
 required-template checks, secret scans, `.gitignore` coverage, the public-IPv4 allowlist,
-and the ban on legacy `fi*` / Finnish names.
+and the ban on legacy `fi*` / Finnish names and on the old setup-script filenames.
 
 Deployment (as root, Ubuntu 22.04/24.04, repo at `/opt/belka-vpn`):
 
 ```bash
 bash scripts/configure.sh --role both --output-dir ./env        # writes ru.env + foreign.env
 bash scripts/configure.sh --non-interactive --role both --output-dir ./env  # values from env
-bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
-bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
-bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
-bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
+bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
+bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
+bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 bash scripts/verify.sh                    # on RU
 bash scripts/verify.sh --role foreign     # on FOREIGN
 bash scripts/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env  # fetch ref + run stage
 ```
 
-`foreign-setup.sh` and `ru-setup.sh` also accept `--dry-run` and `--uninstall`; both
+`install-foreign.sh` and `install-ru.sh` also accept `--dry-run` and `--uninstall`; both
 paths still require an env file containing both public IPs, because the `:?` checks run
-before argument dispatch. `foreign-setup.sh --ru-pub KEY` supplies the RU public key
+before argument dispatch. `install-foreign.sh --ru-pub KEY` supplies the RU public key
 directly instead of via a handoff file. Extra `bootstrap.sh` arguments are forwarded
-verbatim to the selected setup script; `--ref` defaults to `main`.
+verbatim to the selected installer; `--ref` defaults to `main`.
 
 ## Architecture
 
@@ -89,7 +89,7 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   `belka_init`), env/handoff loading, apt helpers, AmneziaWG install and key/obfuscation
   generation, `render_template`, `write_if_changed`, UFW/fail2ban, SSH hardening.
   Interactive output is written to fd 3 so it does not receive log formatting.
-- `scripts/{foreign,ru}-setup.sh` — per-role orchestration. `ru-setup.sh` installs
+- `scripts/install-{foreign,ru}.sh` — per-role installation and orchestration. `install-ru.sh` installs
   Hiddify Manager **before** bringing up `awg0` so the Hiddify installer cannot touch the
   tunnel; it then writes `/root/belka-ru-manual-checklist.txt`.
 - `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer, SOCKS
@@ -125,7 +125,7 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   re-exchanged or the handshake stops. `AWG_ENABLE_S3S4=0` is the safe default.
 - Hiddify blocks QUIC/443 server-side, so YouTube/Google fall back to TCP. Claude Code
   does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
-- Hiddify Manager removal is intentionally manual and destructive; `ru-setup.sh
+- Hiddify Manager removal is intentionally manual and destructive; `install-ru.sh
   --uninstall` leaves it installed.
 - Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
   order), `docs/troubleshooting.md` (diagnosis), and the Russian README quick start.

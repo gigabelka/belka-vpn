@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# foreign-setup.sh — foreign server: AmneziaWG peer + Xray SOCKS egress + firewall.
+# install-foreign.sh — foreign server: AmneziaWG peer + Xray SOCKS egress + firewall.
 #
 # Run from a checkout of the belka-vpn repository:
-#   bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
-#   bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+#   bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
+#   bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 #
 # First run creates keys, obfuscation parameters and the FOREIGN handoff file.
 # The RU peer is added on a later run, after the RU public key is known.
@@ -22,7 +22,7 @@ DRY_RUN=0
 
 usage() {
   cat <<'EOF'
-Usage: foreign-setup.sh [options]
+Usage: install-foreign.sh [options]
 
 Options:
   --env-file FILE   Server env file (default: /etc/belka-vpn/foreign.env)
@@ -197,9 +197,9 @@ Next steps
   1) Copy the FOREIGN handoff to the RU server (public data only):
      scp -i <key> root@${FOREIGN_PUBLIC_IP}:/root/belka-foreign-handoff.env /tmp/belka-foreign-handoff.env
      scp -i <key> /tmp/belka-foreign-handoff.env root@${RU_PUBLIC_IP}:/root/belka-foreign-handoff.env
-  2) On RU: bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+  2) On RU: bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
   3) Copy /root/belka-ru-handoff.env from RU to FOREIGN and run:
-     bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+     bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 EOF
 }
 

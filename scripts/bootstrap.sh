@@ -8,7 +8,7 @@
 #   bash /root/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env
 #
 # If GitHub is unreachable from the server, copy a checkout with tar/scp and run
-# scripts/<role>-setup.sh directly.
+# scripts/install-<role>.sh directly.
 
 set -euo pipefail
 
@@ -21,7 +21,7 @@ PASSTHROUGH=()
 
 usage() {
   cat <<'EOF'
-Usage: bootstrap.sh <foreign|ru> [options] [-- setup-options]
+Usage: bootstrap.sh <foreign|ru> [options] [-- installer-options]
 
 Options:
   --ref REF         Branch, tag or commit to deploy (default: main)
@@ -88,13 +88,14 @@ else
   git -C "$DEST" checkout -q FETCH_HEAD
 fi
 
-SETUP="$DEST/scripts/${ROLE}-setup.sh"
-if [[ ! -r $SETUP ]]; then
-  echo "setup script not found: $SETUP" >&2
+INSTALLER="$DEST/scripts/install-${ROLE}.sh"
+if [[ ! -r $INSTALLER ]]; then
+  echo "installer not found: $INSTALLER" >&2
+  echo "The deployed ref must contain scripts/install-${ROLE}.sh." >&2
   echo "If GitHub is unreachable, copy a checkout to $DEST with tar/scp and run:" >&2
-  echo "  bash $DEST/scripts/${ROLE}-setup.sh --env-file $ENV_FILE ${PASSTHROUGH[*]:-}" >&2
+  echo "  bash $DEST/scripts/install-${ROLE}.sh --env-file $ENV_FILE ${PASSTHROUGH[*]:-}" >&2
   exit 1
 fi
 
-echo "running $SETUP"
-exec env ENV_FILE="$ENV_FILE" bash "$SETUP" "${PASSTHROUGH[@]}"
+echo "running $INSTALLER"
+exec env ENV_FILE="$ENV_FILE" bash "$INSTALLER" "${PASSTHROUGH[@]}"

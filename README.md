@@ -28,8 +28,8 @@ scripts/
   configure.sh       # интерактивно спрашивает IP/порты/SNI и пишет ru.env + foreign.env
   bootstrap.sh       # доставка/обновление репозитория на сервере + запуск этапа
   lib.sh             # общие функции
-  foreign-setup.sh   # зарубежный сервер: AmneziaWG + Xray SOCKS + firewall
-  ru-setup.sh        # Россия: AmneziaWG + установка Hiddify Manager
+  install-foreign.sh # зарубежный сервер: AmneziaWG + Xray SOCKS + firewall
+  install-ru.sh      # Россия: AmneziaWG + установка Hiddify Manager
   verify.sh          # проверки тоннеля, SOCKS и маршрутизации
   env/               # примеры /etc/belka-vpn/foreign.env и ru.env (IP пустые)
 config/
@@ -132,7 +132,7 @@ install -m 600 scripts/env/foreign.env.example /etc/belka-vpn/foreign.env
 ### 3. Зарубежный сервер — первый проход
 
 ```bash
-bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
+bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 ```
 
 Скрипт создаёт `/root/belka-foreign-handoff.env` (публичные данные). RU-peer пока не добавлен — handshake появится на шаге 5.
@@ -140,7 +140,7 @@ bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
 ### 4. Россия — ключи
 
 ```bash
-bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
+bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
 ```
 
 Скрипт печатает `RU_PUBLIC_KEY` и создаёт `/root/belka-ru-handoff.env`.
@@ -150,7 +150,7 @@ bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
 Скопируйте `/root/belka-ru-handoff.env` с РФ на зарубежный сервер и выполните:
 
 ```bash
-bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 ```
 
 Проверьте handshake:
@@ -164,7 +164,7 @@ awg show
 Скопируйте `/root/belka-foreign-handoff.env` с зарубежного сервера на РФ и выполните:
 
 ```bash
-bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
 Скрипт установит Hiddify Manager (5–10 минут), поднимет `awg0` и напечатает чек-лист `/root/belka-ru-manual-checklist.txt`.
@@ -224,7 +224,7 @@ bash scripts/verify.sh --role foreign
 ```bash
 # если репозиторий доступен с сервера
 bash /root/bootstrap.sh foreign --ref main --env-file /etc/belka-vpn/foreign.env
-# или повторно скопируйте tar/scp и запустите setup-скрипт
+# или повторно скопируйте tar/scp и запустите скрипт установки
 ```
 
 Скрипты идемпотентны: повторный запуск не дублирует правила, не перегенерирует ключи и не перезапускает сервисы без изменений. Ротация — `ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1` (с последующей передачей handoff на другую сторону).
@@ -232,8 +232,8 @@ bash /root/bootstrap.sh foreign --ref main --env-file /etc/belka-vpn/foreign.env
 ## Откат
 
 ```bash
-bash scripts/foreign-setup.sh --uninstall
-bash scripts/ru-setup.sh --uninstall
+bash scripts/install-foreign.sh --uninstall
+bash scripts/install-ru.sh --uninstall
 ```
 
 Hiddify Manager удаляется отдельно (официальный uninstall-скрипт), чтобы не задеть SSH и данные. Подробнее — в `docs/runbook.md`.

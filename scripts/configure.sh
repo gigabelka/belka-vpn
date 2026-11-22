@@ -280,8 +280,8 @@ if [[ $ROLE == both ]]; then
   say "    scp $OUT_DIR/foreign.env root@${FOREIGN_PUBLIC_IP}:/etc/belka-vpn/foreign.env"
   say "  Or run this script separately on each server."
 elif [[ $ROLE == foreign ]]; then
-  say "  bash scripts/foreign-setup.sh --env-file $OUT_DIR/foreign.env"
+  say "  bash scripts/install-foreign.sh --env-file $OUT_DIR/foreign.env"
 else
-  say "  bash scripts/ru-setup.sh --env-file $OUT_DIR/ru.env"
+  say "  bash scripts/install-ru.sh --env-file $OUT_DIR/ru.env"
 fi
 say "  No private keys or passwords are stored in these files."

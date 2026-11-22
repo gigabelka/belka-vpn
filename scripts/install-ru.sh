@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# ru-setup.sh — Russia server: AmneziaWG client + Hiddify Manager install.
+# install-ru.sh — Russia server: AmneziaWG client + Hiddify Manager install.
 #
 # Typical sequence:
-#   1) bash scripts/ru-setup.sh --keys-only --env-file /etc/belka-vpn/ru.env
-#   2) on FOREIGN: bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
-#   3) bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+#   1) bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
+#   2) on FOREIGN: bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
+#   3) bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 #
 # Hiddify Manager UI steps (Reality, Outbounds, sniffing) remain manual and are
 # printed from /root/belka-ru-manual-checklist.txt.
@@ -23,7 +23,7 @@ DRY_RUN=0
 
 usage() {
   cat <<'EOF'
-Usage: ru-setup.sh [options]
+Usage: install-ru.sh [options]
 
 Options:
   --env-file FILE   Server env file (default: /etc/belka-vpn/ru.env)
@@ -149,7 +149,7 @@ RU readiness
 
 Next steps
   1) If the handshake is absent, copy /root/belka-ru-handoff.env to FOREIGN and run:
-     bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+     bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
   2) Run: hiddify admin   (the link is a secret)
   3) Follow /root/belka-ru-manual-checklist.txt in the panel.
   4) On RU run: bash scripts/verify.sh
