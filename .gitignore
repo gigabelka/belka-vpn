@@ -11,6 +11,7 @@ id_ed25519*
 belka-*.env
 *handoff*.env
 secrets/
+*.local.txt
 
 # Logs and caches
 *.log

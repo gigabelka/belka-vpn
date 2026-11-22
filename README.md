@@ -37,6 +37,7 @@ config/
   foreign/           # шаблоны awg0.conf и xray config
   ru/                # шаблон awg0.conf + чек-лист панели
   rules/             # готовые списки доменов/geosite/geoip для Hiddify
+  client/            # пример списка IP в обход VPN для клиента Hiddify app
 docs/
   architecture.md    # подробная схема и обоснование
   runbook.md         # пошаговое развёртывание
@@ -202,7 +203,15 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 - Resolve Destination — **OFF**;
 - на десктопе — **TUN/VPN mode** (Claude Code не поддерживает SOCKS).
 
-Присланный список AllowedIPs эквивалентен «полный тоннель минус LAN»: `Bypass LAN` покрывает `10/8`, `172.16/12`, `192.168/16`. Если нужен буквальный список — добавьте Direct-правила IP-CIDR для непокрытых подсетей; 149 CIDR вручную вносить не нужно.
+#### Адреса в обход VPN
+
+Список AllowedIPs «весь интернет минус исключения» в клиент целиком вносить не нужно — достаточно самих исключений как Direct-правила:
+
+1. Скопируйте `config/client/hiddify-bypass.txt.example` в `config/client/hiddify-bypass.local.txt` и впишите реальные CIDR, по одному на строку. Файл в `.gitignore` (`*.local.txt`): публичные IP в репозиторий не попадают.
+2. В клиенте: **Настройки → Правила маршрутизации → добавить правило**, тип **IP CIDR**, вставить строки из `.local.txt`, outbound **Direct**, сохранить и переподключиться.
+3. Проверка: `tracert -d <IP из списка>` — первый хоп через локальный шлюз, в логах Hiddify соединение идёт через `direct`.
+
+Файлы клиента (`%APPDATA%\Hiddify\hiddify\route_rule.proto` — бинарный protobuf, `configs\*.json` — с ключами) вручную не правьте и в репозиторий не кладите.
 
 ### 9. Проверка
 
