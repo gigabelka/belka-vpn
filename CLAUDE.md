@@ -28,8 +28,9 @@ English. Roles are always named exactly `ru` and `foreign`.
   RU-owned `RU_PUBLIC_IP` and `REALITY_SNI` afterwards.
 - RU firewall is owned by Hiddify Manager; only the FOREIGN server uses UFW.
   `configure.sh` always writes `ENABLE_UFW=0` to `ru.env`, though `install-ru.sh` never
-  reads the flag. Do not add manual `ufw`/`iptables` rules on RU (fail2ban on RU is the
-  one deliberate exception: it adds its own ban chains).
+  reads the flag. Do not add manual `ufw`/`iptables` rules on RU. fail2ban on RU uses
+  `banaction = route` (bans are `ip route add unreachable <ip>`), so it never touches the
+  firewall; FOREIGN keeps the default iptables ban action.
 
 ## Commands
 

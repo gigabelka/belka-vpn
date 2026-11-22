@@ -301,7 +301,8 @@ EOF
   write_ru_handoff
   render_ru_awg
   start_awg
-  setup_fail2ban
+  # Hiddify Manager owns the RU firewall: ban via blackhole routes, not iptables.
+  setup_fail2ban route
   write_checklist
   harden_ssh
   summary_ru

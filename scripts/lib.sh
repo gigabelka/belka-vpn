@@ -343,21 +343,32 @@ ufw_rule() {
 ufw_allow() { ufw_rule allow "$@"; }
 ufw_limit() { ufw_rule limit "$@"; }
 
+# setup_fail2ban [BANACTION]
+# Without an argument fail2ban keeps its default (iptables-multiport), which is
+# fine on FOREIGN where belka owns the firewall. RU passes "route": bans become
+# `ip route add unreachable <ip>` and never touch the firewall that Hiddify
+# Manager owns.
 setup_fail2ban() {
+  local banaction=${1:-}
   if [[ ${ENABLE_FAIL2BAN:-1} != 1 ]]; then
     log INFO "fail2ban disabled by env"
     return 0
   fi
   install -d -m 755 /etc/fail2ban/jail.d
-  write_if_changed /etc/fail2ban/jail.d/belka-sshd.local 644 <<EOF
-[sshd]
-enabled = true
-port = ${SSH_PORT}
-maxretry = 5
-findtime = 10m
-bantime = 1h
-EOF
-  systemctl enable --now fail2ban >>"$LOG" 2>&1 || warn "fail2ban failed to start"
+  # Process substitution, not a pipe: write_if_changed must run in this shell
+  # so TEMPLATE_CHANGED reaches the restart check below.
+  write_if_changed /etc/fail2ban/jail.d/belka-sshd.local 644 < <(
+    printf '[sshd]\nenabled = true\nport = %s\nmaxretry = 5\nfindtime = 10m\nbantime = 1h\n' "$SSH_PORT"
+    [[ -z $banaction ]] || printf 'banaction = %s\n' "$banaction"
+  )
+  local changed=$TEMPLATE_CHANGED
+  systemctl enable fail2ban >>"$LOG" 2>&1 || true
+  if (( changed )) || ! systemctl is-active -q fail2ban; then
+    systemctl restart fail2ban >>"$LOG" 2>&1 || { warn "fail2ban failed to start"; return 0; }
+    log INFO "fail2ban restarted${banaction:+ (banaction=$banaction)}"
+  else
+    log INFO "fail2ban unchanged and active"
+  fi
 }
 
 harden_ssh() {

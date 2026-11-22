@@ -238,3 +238,7 @@ Firewall, затем Apply now), а не ручными `iptables`/`ufw`: пан
 systemctl restart ssh
 fail2ban-client unban --all     # если вас забанил fail2ban
 ```
+
+fail2ban на RU банит через маршрут (`banaction = route`), а не через iptables:
+забаненный адрес виден в `ip route show type unreachable`. Если fail2ban не
+отвечает, снимите бан вручную: `ip route del unreachable <ваш IP>`.
