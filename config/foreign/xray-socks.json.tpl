@@ -8,7 +8,7 @@
   },
   "inbounds": [
     {
-      "tag": "socks-fi",
+      "tag": "socks-foreign",
       "listen": "${FOREIGN_TUNNEL_IP}",
       "port": ${SOCKS_PORT},
       "protocol": "socks",

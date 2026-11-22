@@ -85,7 +85,7 @@ else
 fi
 
 if grep -RIn --exclude-dir=.git --exclude='lint.sh' -E \
-  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|foreign-setup\.sh|ru-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi' .; then
+  'FI_PUBLIC_IP|FI_TUNNEL_IP|FI_PUBLIC_KEY|FI_PRIVATE_KEY|FI_HANDOFF_FILE|belka-fi-|FI-Domains|FI-Telegram-IP|Финлянд|финск|fi-setup\.sh|foreign-setup\.sh|ru-setup\.sh|config/fi|belka-vpn-fi\.log|--role fi|bootstrap\.sh fi|socks-fi\b' .; then
   fail "legacy FI names found (see lines above)"
 else
   note "ok   no legacy FI names"
@@ -119,14 +119,16 @@ allowed_ipv4() {
 mapfile -t ipv4 < <(
   grep -RhoE --exclude-dir=.git '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' . 2>/dev/null | sort -u
 )
+ipv4_bad=0
 for ip in "${ipv4[@]}"; do
   if ! allowed_ipv4 "$ip"; then
     fail "hardcoded public IPv4 outside allowlist: $ip"
+    ipv4_bad=1
   fi
 done
 if (( ${#ipv4[@]} == 0 )); then
   note "ok   no IPv4 literals found"
-else
+elif (( ! ipv4_bad )); then
   note "ok   IPv4 literals checked (${#ipv4[@]} unique)"
 fi
 

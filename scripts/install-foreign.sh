@@ -71,7 +71,6 @@ FOREIGN_TUNNEL_IP=${FOREIGN_TUNNEL_IP}
 RU_TUNNEL_IP=${RU_TUNNEL_IP}
 SOCKS_PORT=${SOCKS_PORT}
 AWG_MTU=${AWG_MTU}
-REALITY_SNI=${REALITY_SNI}
 FOREIGN_PUBLIC_KEY=$(cat "$KEY_DIR/public.key")
 AWG_JC=${AWG_JC}
 AWG_JMIN=${AWG_JMIN}
@@ -193,14 +192,25 @@ FOREIGN readiness
   xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
   handoff:     /root/belka-foreign-handoff.env
 
+EOF
+  if [[ -z $RU_PUBLIC_KEY ]]; then
+    cat >&3 <<EOF
 Next steps
-  1) Copy the FOREIGN handoff to the RU server (public data only):
+  1) On RU: bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
+  2) Copy /root/belka-ru-handoff.env from RU to FOREIGN and run:
+     bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
+  3) Copy this FOREIGN handoff to RU (public data only) and run there:
+     bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
+EOF
+  else
+    cat >&3 <<EOF
+Next steps
+  1) Copy this FOREIGN handoff to RU (public data only):
      scp -i <key> root@${FOREIGN_PUBLIC_IP}:/root/belka-foreign-handoff.env /tmp/belka-foreign-handoff.env
      scp -i <key> /tmp/belka-foreign-handoff.env root@${RU_PUBLIC_IP}:/root/belka-foreign-handoff.env
   2) On RU: bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
-  3) Copy /root/belka-ru-handoff.env from RU to FOREIGN and run:
-     bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 EOF
+  fi
 }
 
 uninstall_foreign() {

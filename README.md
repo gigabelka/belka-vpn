@@ -9,10 +9,11 @@
 
 ```text
 Hiddify app ──VLESS+Reality/443──► RU <RU_PUBLIC_IP> (Hiddify Manager)
-                                     ├─ geosite:youtube/google/telegram/anthropic/openai
+                                     ├─ 1. FOREIGN-Domains: домены + geosite (youtube/google/telegram/anthropic/openai)
                                      │        └─ Socks ──► 172.16.0.1:1080 (FOREIGN Xray)
-                                     │                        [внутри AmneziaWG/UDP]
-                                     └─ всё остальное ──► Direct (RU)
+                                     ├─ 2. FOREIGN-Telegram-IP: geoip:telegram
+                                     │        └─ Socks ──► 172.16.0.1:1080  [внутри AmneziaWG/UDP]
+                                     └─ 3. всё остальное ──► Direct (RU)
 
 RU 172.16.0.2 ══════ AmneziaWG ══════ 172.16.0.1 FOREIGN <FOREIGN_PUBLIC_IP> ──► интернет
 ```
@@ -41,7 +42,7 @@ docs/
   runbook.md         # пошаговое развёртывание
   troubleshooting.md # типовые проблемы
 tests/lint.sh        # bash -n, shellcheck, запрет реальных IP и устаревших имён
-.env.example         # локальные параметры; IP пустые, .env — gitignored
+.env.example         # справочник всех переменных; скрипты его не читают (см. комментарий в файле)
 ```
 
 ## Требования
@@ -79,13 +80,12 @@ ssh -i "$env:USERPROFILE\.ssh\belka_vpn_ed25519" -o BatchMode=yes root@<RU_IP> h
 ssh -i "$env:USERPROFILE\.ssh\belka_vpn_ed25519" -o BatchMode=yes root@<FOREIGN_IP> hostname
 ```
 
-### 1. Доставка репозитория
+### 1. Доставка репозитория (на оба сервера)
 
-Если репозиторий уже отправлен в GitHub:
+Если GitHub с сервера доступен:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gigabelka/belka-vpn/main/scripts/bootstrap.sh -o /root/bootstrap.sh
-bash /root/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env
+git clone https://github.com/gigabelka/belka-vpn.git /opt/belka-vpn
 ```
 
 Если GitHub с сервера недоступен (актуально для РФ):
@@ -93,7 +93,10 @@ bash /root/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env
 ```powershell
 # с рабочей станции
 tar czf - scripts config docs tests .env.example | ssh -i <key> root@<RU_IP> "mkdir -p /opt/belka-vpn && tar xzf - -C /opt/belka-vpn"
+tar czf - scripts config docs tests .env.example | ssh -i <key> root@<FOREIGN_IP> "mkdir -p /opt/belka-vpn && tar xzf - -C /opt/belka-vpn"
 ```
+
+`bootstrap.sh` (см. «Обновление») требует уже готовый env-файл из шага 2 и сразу запускает установщик, поэтому он заменяет шаги 1 и 3 только после того, как env создан.
 
 ### 2. IP серверов: конфигуратор
 
@@ -106,19 +109,19 @@ bash scripts/configure.sh --role foreign   # пишет /etc/belka-vpn/foreign.e
 bash scripts/configure.sh --role ru        # пишет /etc/belka-vpn/ru.env
 ```
 
-Вариант Б — локально, затем скопировать оба файла:
+Вариант Б — локально, затем скопировать оба файла. Каталог вывода — вне репозитория: `tests/lint.sh` сканирует и gitignored-файлы и упадёт на реальных IP.
 
 ```bash
-bash scripts/configure.sh --role both --output-dir ./env
-scp ./env/ru.env root@<RU_IP>:/etc/belka-vpn/ru.env
-scp ./env/foreign.env root@<FOREIGN_IP>:/etc/belka-vpn/foreign.env
+bash scripts/configure.sh --role both --output-dir ~/belka-env
+scp ~/belka-env/ru.env root@<RU_IP>:/etc/belka-vpn/ru.env
+scp ~/belka-env/foreign.env root@<FOREIGN_IP>:/etc/belka-vpn/foreign.env
 ```
 
-Неинтерактивный режим (значения из env):
+Неинтерактивный режим (все значения и флаги берутся из окружения, кроме `ENABLE_UFW` для RU — он всегда `0`):
 
 ```bash
 RU_PUBLIC_IP=<RU_IP> FOREIGN_PUBLIC_IP=<FOREIGN_IP> \
-  bash scripts/configure.sh --non-interactive --role both --output-dir ./env
+  bash scripts/configure.sh --non-interactive --role both --output-dir ~/belka-env
 ```
 
 Файлы создаются с правами `600`. Конфигуратор также можно использовать вместо копирования примеров:
@@ -135,7 +138,7 @@ install -m 600 scripts/env/foreign.env.example /etc/belka-vpn/foreign.env
 bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 ```
 
-Скрипт создаёт `/root/belka-foreign-handoff.env` (публичные данные). RU-peer пока не добавлен — handshake появится на шаге 5.
+Скрипт создаёт `/root/belka-foreign-handoff.env` (публичные данные). RU-peer пока не добавлен — handshake появится на шаге 6, когда RU поднимет `awg0`.
 
 ### 4. Россия — ключи
 
@@ -153,10 +156,10 @@ bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
 bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 ```
 
-Проверьте handshake:
+Проверьте, что peer добавлен (handshake ещё нет: `--keys-only` не поднимает `awg0` на RU):
 
 ```bash
-awg show
+awg show   # peer с RU_PUBLIC_KEY присутствует
 ```
 
 ### 6. Россия — установка и тоннель
@@ -167,7 +170,7 @@ awg show
 bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
-Скрипт установит Hiddify Manager (5–10 минут), поднимет `awg0` и напечатает чек-лист `/root/belka-ru-manual-checklist.txt`.
+Скрипт установит Hiddify Manager (5–10 минут), поднимет `awg0` и напечатает чек-лист `/root/belka-ru-manual-checklist.txt`. Теперь `awg show` на обеих сторонах должен показать свежий handshake.
 
 ### 7. Панель Hiddify Manager
 
@@ -179,7 +182,7 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 
 1. **Country = Russia**, протоколы — только **VLESS**, домен не обязателен (IP + self-signed).
 2. **Settings → Advanced → Common Proxy Core = Xray** — без этого `geosite`/`geoip` не работают, а домен из SNI не переподставляется.
-3. **Only IPv4 = ON**, DNS = `1.1.1.1`, firewall пока OFF.
+3. **Only IPv4 = ON**, DNS = `1.1.1.1`, firewall Hiddify пока OFF (включать в панели после успешного `verify.sh`; ручных ufw/iptables не добавлять).
 4. Reality на `443/tcp`, SNI — чужой сайт с TLS 1.3 + HTTP/2 (подобрать сканером).
 5. Два outbound типа **Socks** на `172.16.0.1:1080`:
    - `FOREIGN-Domains` — только домены (`/root/belka-foreign-domains.txt`) и `geosite` (`/root/belka-foreign-geosites.txt`), **без** `geoip:google`;
@@ -228,7 +231,9 @@ bash /root/bootstrap.sh foreign --ref main --env-file /etc/belka-vpn/foreign.env
 # или повторно скопируйте tar/scp и запустите скрипт установки
 ```
 
-Скрипты идемпотентны: повторный запуск не дублирует правила, не перегенерирует ключи и не перезапускает сервисы без изменений. Ротация — `ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1` (с последующей передачей handoff на другую сторону).
+Скрипты идемпотентны: повторный запуск не дублирует правила, не перегенерирует ключи и не перезапускает сервисы без изменений. Ротация — `ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1` (с последующей передачей handoff на другую сторону, см. `docs/runbook.md`).
+
+Дополнительные аргументы `bootstrap.sh` передаются установщику; явный разделитель — `--`, например `bootstrap.sh ru -- --handoff /root/belka-foreign-handoff.env --dry-run`. Сам `bootstrap.sh` забирает `--ref`, `--env-file`, `-h`.
 
 ## Откат
 

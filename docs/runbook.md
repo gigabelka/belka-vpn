@@ -41,19 +41,21 @@ bash scripts/configure.sh --role foreign   # /etc/belka-vpn/foreign.env
 bash scripts/configure.sh --role ru        # /etc/belka-vpn/ru.env
 ```
 
-Или локально, затем скопировать:
+Или локально, затем скопировать (каталог вывода — вне репозитория, иначе
+`tests/lint.sh` упадёт на реальных IP):
 
 ```bash
-bash scripts/configure.sh --role both --output-dir ./env
-scp ./env/ru.env root@<RU_IP>:/etc/belka-vpn/ru.env
-scp ./env/foreign.env root@<FOREIGN_IP>:/etc/belka-vpn/foreign.env
+bash scripts/configure.sh --role both --output-dir ~/belka-env
+scp ~/belka-env/ru.env root@<RU_IP>:/etc/belka-vpn/ru.env
+scp ~/belka-env/foreign.env root@<FOREIGN_IP>:/etc/belka-vpn/foreign.env
 ```
 
-Неинтерактивный режим:
+Неинтерактивный режим (значения и флаги из окружения; `ENABLE_UFW` для RU
+всегда `0`):
 
 ```bash
 RU_PUBLIC_IP=<RU_IP> FOREIGN_PUBLIC_IP=<FOREIGN_IP> \
-  bash scripts/configure.sh --non-interactive --role both --output-dir ./env
+  bash scripts/configure.sh --non-interactive --role both --output-dir ~/belka-env
 ```
 
 Альтернатива — вручную из примеров:
@@ -110,8 +112,11 @@ scp -i <key> belka-ru-handoff.env root@<FOREIGN_IP>:/root/belka-ru-handoff.env
 
 ```bash
 bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
-awg show     # ожидается свежий handshake и растущий transfer
+awg show     # peer RU присутствует; handshake появится после шага 6
 ```
+
+`--keys-only` на шаге 4 не поднимает `awg0` на RU, поэтому handshake здесь
+ещё невозможен.
 
 ## 6. Россия: установка и тоннель
 
@@ -126,14 +131,14 @@ scp -i <key> belka-foreign-handoff.env root@<RU_IP>:/root/belka-foreign-handoff.
 bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
-Порядок внутри скрипта: Hiddify Manager → AmneziaWG `awg0` → RU handoff →
-чек-лист. Hiddify ставится до поднятия тоннеля, чтобы инсталлятор не трогал
-`awg0`.
+Порядок внутри скрипта: Hiddify Manager → AmneziaWG (пакет, ключи) → RU
+handoff → `awg0` → fail2ban → чек-лист. Hiddify ставится до поднятия тоннеля,
+чтобы инсталлятор не трогал `awg0`.
 
 Проверка:
 
 ```bash
-awg show
+awg show     # свежий handshake и растущий transfer
 ping -c3 172.16.0.1
 curl -s --socks5-hostname 172.16.0.1:1080 https://api.ipify.org
 ```
@@ -148,7 +153,8 @@ hiddify admin   # ссылка — секрет
 
 1. Country = Russia; только VLESS; без домена — IP + self-signed.
 2. **Common Proxy Core = Xray**.
-3. Only IPv4 = ON; DNS `1.1.1.1`; firewall пока OFF.
+3. Only IPv4 = ON; DNS `1.1.1.1`; firewall Hiddify пока OFF (включать в
+   панели после успешного `verify.sh`; ручных ufw/iptables не добавлять).
 4. Reality 443/tcp; SNI — чужой TLS1.3/HTTP2-сайт (Scanner).
 5. Outbound `FOREIGN-Domains`: Socks `172.16.0.1:1080`, списки
    `/root/belka-foreign-domains.txt` + `/root/belka-foreign-geosites.txt`,
@@ -197,14 +203,17 @@ bash scripts/verify.sh --role foreign
 Ротация:
 
 ```bash
-# зарубежный сервер
+# 1. зарубежный сервер
 ROTATE_KEYS=1 ROTATE_OBFUSCATION=1 bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
-# передать новый handoff на RU, затем
+# 2. передать новый /root/belka-foreign-handoff.env на RU, затем на RU:
 ROTATE_KEYS=1 bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
+# 3. передать новый /root/belka-ru-handoff.env на зарубежный сервер, затем там:
+bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 ```
 
-После ротации обфускации обязательно обновите handoff на обеих сторонах,
-иначе handshake перестанет проходить.
+Шаг 3 обязателен при ротации ключей RU: иначе зарубежный сервер держит старый
+`RU_PUBLIC_KEY` и handshake перестаёт проходить. То же после ротации
+обфускации — handoff нужно обновить на обеих сторонах.
 
 ## 11. Откат
 
@@ -220,10 +229,12 @@ ls /opt/hiddify-manager/uninstall.sh
 # прочитайте и выполните осознанно; это удалит панель и её данные
 ```
 
-Если потерян SSH на RU, используйте консоль провайдера:
+Если потерян SSH на RU, используйте консоль провайдера. Firewall на RU
+принадлежит Hiddify Manager — правьте его через панель (Settings → Advanced →
+Firewall, затем Apply now), а не ручными `iptables`/`ufw`: панель перезапишет
+ручные правила. Если доступа к панели нет:
 
 ```bash
-iptables -P INPUT ACCEPT
-iptables -P FORWARD ACCEPT
 systemctl restart ssh
+fail2ban-client unban --all     # если вас забанил fail2ban
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # install-ru.sh — Russia server: AmneziaWG client + Hiddify Manager install.
 #
-# Typical sequence:
+# Typical sequence (after the first FOREIGN run created its handoff):
 #   1) bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
 #   2) on FOREIGN: bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
 #   3) bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
@@ -52,9 +52,8 @@ parse_args() {
 
 preflight_ru() {
   check_tunnel_conflict
-  if [[ ! -f $AWG_DIR/awg0.conf ]] && port_udp_busy "$AWG_PORT"; then
-    warn "UDP/$AWG_PORT is already in use (check for conflicts)"
-  fi
+  # RU is the AmneziaWG client (no ListenPort): AWG_PORT is only the remote
+  # endpoint, so a local UDP/$AWG_PORT listener is not a conflict.
   if [[ ${INSTALL_HIDDIFY:-1} == 1 && ! -d /opt/hiddify-manager ]]; then
     if ss -lntp 2>/dev/null | grep -qE ':(80|443) '; then
       die "ports 80/443 are in use; Hiddify Manager needs them (stop the service or set INSTALL_HIDDIFY=0)"
@@ -265,15 +264,24 @@ EOF
     exit 0
   fi
 
-  local local_ru_public_ip=${RU_PUBLIC_IP:-}
+  # RU-owned values from the local env must survive loading the FOREIGN
+  # handoff (older handoffs also carry REALITY_SNI).
+  local local_ru_public_ip=${RU_PUBLIC_IP:-} local_reality_sni=${REALITY_SNI:-}
+  local stored_handoff=$BELKA_CONFIG_DIR/foreign-handoff.env
   if [[ -z $HANDOFF_IN ]]; then
-    HANDOFF_IN=${FOREIGN_HANDOFF_FILE:-/etc/belka-vpn/foreign-handoff.env}
+    HANDOFF_IN=${FOREIGN_HANDOFF_FILE:-$stored_handoff}
   fi
   load_handoff "$HANDOFF_IN"
-  install -D -m 600 "$HANDOFF_IN" "$BELKA_CONFIG_DIR/foreign-handoff.env"
-  # Keep the RU server's own public IP from the local env.
+  # On reruns the input is the stored copy itself; install(1) refuses to copy
+  # a file onto itself.
+  if [[ ! -e $stored_handoff || ! $HANDOFF_IN -ef $stored_handoff ]]; then
+    install -D -m 600 "$HANDOFF_IN" "$stored_handoff"
+  fi
   if [[ -n $local_ru_public_ip ]]; then
     RU_PUBLIC_IP=$local_ru_public_ip
+  fi
+  if [[ -n $local_reality_sni ]]; then
+    REALITY_SNI=$local_reality_sni
   fi
 
   : "${FOREIGN_PUBLIC_KEY:?FOREIGN handoff missing FOREIGN_PUBLIC_KEY}"

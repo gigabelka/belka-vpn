@@ -35,8 +35,8 @@ load_env_file "$ENV_FILE" || warn "env file not found: $ENV_FILE"
 apply_defaults
 
 if [[ $TARGET_ROLE == ru ]]; then
-  if [[ -r /etc/belka-vpn/foreign-handoff.env ]]; then
-    load_handoff /etc/belka-vpn/foreign-handoff.env
+  if [[ -r $BELKA_CONFIG_DIR/foreign-handoff.env ]]; then
+    load_handoff "$BELKA_CONFIG_DIR/foreign-handoff.env"
   elif [[ -r /root/belka-foreign-handoff.env ]]; then
     load_handoff /root/belka-foreign-handoff.env
   else
@@ -93,7 +93,7 @@ check_hiddify_routing() {
 
   # Hiddify 14.x writes SOCKS endpoints as settings.address/port and tags them socks-<id>;
   # older layouts use settings.servers[0]. Support both.
-  local socks_count socks_tags tags_json tag domain_count google_count telegram_count
+  local socks_count socks_tags tags_json tag domain_count google_count google_full_count telegram_count
   local domain_idx telegram_idx
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
@@ -139,16 +139,24 @@ check_hiddify_routing() {
     bad "Hiddify has no domain/geosite rule pointing to a SOCKS outbound"
   fi
 
-  # Google coverage guards Gemini/YouTube: accept the forms Hiddify emits for a
-  # bare site entry plus the geosite tag.
+  # Google coverage guards Gemini/YouTube: accept the subdomain-matching forms
+  # Hiddify emits for a bare site entry plus the geosite tag. An exact
+  # full:google.com match does not cover gemini.google.com and friends.
   google_count=$(jq --argjson tags "$tags_json" '
     [.routing.rules[]?
      | select(.outboundTag as $t | ($tags | index($t // "")) != null)
      | (.domain // [])[]
-     | select(. == "google.com" or . == "domain:google.com" or . == "full:google.com"
+     | select(. == "google.com" or . == "domain:google.com"
               or . == "geosite:google")] | length' "$cfg")
+  google_full_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "full:google.com")] | length' "$cfg")
   if (( google_count > 0 )); then
     ok "Hiddify routes google.com/geosite:google to a SOCKS outbound"
+  elif (( google_full_count > 0 )); then
+    warn "Hiddify routes only full:google.com to SOCKS; subdomains (gemini.google.com) are not covered"
   else
     bad "Hiddify routes no google.com/geosite:google rule to a SOCKS outbound"
   fi

@@ -22,9 +22,14 @@ English. Roles are always named exactly `ru` and `foreign`.
   hardcoded public IPv4 outside its allowlist and on private-key material.
 - Never add `set -x`, and never print private keys or the Hiddify admin link.
 - `load_handoff` deliberately rejects files containing secrets; handoffs carry public
-  keys and obfuscation parameters only.
-- RU firewall is owned by Hiddify Manager (`ENABLE_UFW=0`); only the FOREIGN server uses
-  UFW. Do not add manual `ufw`/`iptables` rules on RU.
+  data only: public keys, obfuscation parameters, and the shared tunnel settings (public
+  IPs, `AWG_PORT`, tunnel IPs/net, `SOCKS_PORT`, `AWG_MTU`). The FOREIGN handoff is
+  sourced after `ru.env` and overrides those shared values; `install-ru.sh` restores the
+  RU-owned `RU_PUBLIC_IP` and `REALITY_SNI` afterwards.
+- RU firewall is owned by Hiddify Manager; only the FOREIGN server uses UFW.
+  `configure.sh` always writes `ENABLE_UFW=0` to `ru.env`, though `install-ru.sh` never
+  reads the flag. Do not add manual `ufw`/`iptables` rules on RU (fail2ban on RU is the
+  one deliberate exception: it adds its own ban chains).
 
 ## Commands
 
@@ -42,8 +47,8 @@ and the ban on legacy `fi*` / Finnish names and on the old setup-script filename
 Deployment (as root, Ubuntu 22.04/24.04, repo at `/opt/belka-vpn`):
 
 ```bash
-bash scripts/configure.sh --role both --output-dir ./env        # writes ru.env + foreign.env
-bash scripts/configure.sh --non-interactive --role both --output-dir ./env  # values from env
+bash scripts/configure.sh --role both --output-dir ~/belka-env  # writes ru.env + foreign.env
+bash scripts/configure.sh --non-interactive --role both --output-dir ~/belka-env  # values from env
 bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 bash scripts/install-ru.sh --keys-only --env-file /etc/belka-vpn/ru.env
 bash scripts/install-foreign.sh --handoff /root/belka-ru-handoff.env
@@ -56,8 +61,13 @@ bash scripts/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env  # fetch
 `install-foreign.sh` and `install-ru.sh` also accept `--dry-run` and `--uninstall`; both
 paths still require an env file containing both public IPs, because the `:?` checks run
 before argument dispatch. `install-foreign.sh --ru-pub KEY` supplies the RU public key
-directly instead of via a handoff file. Extra `bootstrap.sh` arguments are forwarded
-verbatim to the selected installer; `--ref` defaults to `main`.
+directly instead of via a handoff file. `bootstrap.sh` consumes the role word, `--ref`
+(default `main`), `--env-file` and `-h`; other arguments, and everything after `--`, are
+forwarded to the selected installer. It requires an existing env file and immediately
+runs the installer.
+
+Keep `configure.sh` output outside the repo: `tests/lint.sh` greps the whole working tree,
+gitignored files included, so generated env files with real IPs make it fail.
 
 ## Architecture
 
@@ -93,12 +103,13 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   Hiddify Manager **before** bringing up `awg0` so the Hiddify installer cannot touch the
   tunnel; it then writes `/root/belka-ru-manual-checklist.txt`.
 - `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer, SOCKS
-  binding (must not listen on `0.0.0.0`), egress IP matches `FOREIGN_PUBLIC_IP`,
-  YouTube `generate_204` returns 204, `api.anthropic.com` must not return 403,
-  Hiddify services running.
+  binding (must not listen on `0.0.0.0`), egress IP vs `FOREIGN_PUBLIC_IP` (a mismatch is
+  only a warning), YouTube `generate_204` returns 204, `api.anthropic.com` must not
+  return 403, Hiddify services running.
 - `config/` — `.tpl` files rendered with `envsubst`; only exported variables are
-  substituted, and **unset variables silently become empty**. `config/rules/*` are copied
-  verbatim to `/root/` on RU for the manual Hiddify setup.
+  substituted, and **unset variables silently become empty**. `config/rules/*` are
+  written to `/root/belka-foreign-{domains,geosites,telegram-ip}.txt` on RU with comments
+  and blank lines stripped (Hiddify rejects them), for the manual Hiddify setup.
 
 ## Idempotency and state
 
@@ -109,12 +120,14 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 
 - Env files: `/etc/belka-vpn/{ru,foreign}.env`, mode 600. Defaults live in
   `apply_defaults()` in `lib.sh`; `configure.sh` contains its own copies of the same
-  defaults and writes the role-specific flags.
+  defaults (environment overrides them) and writes the role-specific flags.
+  `.env.example` is a reference only; no script reads `.env`.
 - Server state: keys in `/etc/amnezia/amneziawg/keys`, obfuscation in
   `/etc/belka-vpn/foreign-obfuscation.env`, Xray in `/usr/local/etc/xray`, Hiddify in
   `/opt/hiddify-manager`, logs in `/var/log/belka-vpn-{ru,foreign,verify,bootstrap}.log`.
-- Modes: 600 for env files, handoffs, keys, logs, and the checklist; 644 for system
-  configs; 700 for `/etc/belka-vpn` and the key directory.
+- Modes: 600 for env files, handoffs, keys, logs, the checklist, and `awg0.conf` (it
+  holds the private key); 644 for other system configs; 700 for `/etc/belka-vpn` and the
+  key directory. Scripts are committed executable (`100755`); `tests/lint.sh` checks it.
 
 ## Operational gotchas
 

@@ -20,7 +20,9 @@ Reality SNI candidate: ${REALITY_SNI}
    - Common Proxy Core = Xray          <-- REQUIRED for geosite/geoip and SNI rewrite
    - Only IPv4 = ON
    - DNS Server = 1.1.1.1 (Cloudflare)
-   - Firewall: keep OFF until AmneziaWG is verified; do not add manual ufw/iptables
+   - Firewall: Hiddify Manager owns the RU firewall. Keep its switch OFF until
+     AmneziaWG and verify.sh pass, then enable it here if wanted.
+     Do not add manual ufw/iptables rules.
 
 3) Reality
    - Enable VLESS + Reality on TCP/443
@@ -36,7 +38,8 @@ Reality SNI candidate: ${REALITY_SNI}
       Sites: copy /root/belka-foreign-domains.txt
       Geosites/GeoIPs (xray): copy /root/belka-foreign-geosites.txt
       (both /root lists are paste-ready: no comments, no blank lines)
-      google.com covers gemini.google.com and aistudio.google.com
+      google.com (domain match) covers gemini.google.com and aistudio.google.com;
+      an exact full:google.com does not (verify.sh warns about it)
       Domestic sites of Iran/Russia: OFF
       Rule-sets (hiddify-core): empty (Common Proxy Core = Xray)
       *** Do NOT add geoip:google here. ***
@@ -81,5 +84,5 @@ Reality SNI candidate: ${REALITY_SNI}
    - gemini.google.com opens without "not available in your country"
      (signed out; an account with RU country stays blocked by account country)
    - Russian sites -> Direct (RU IP)
-   - api.anthropic.com returns 401/400/405, not 403 region
+   - api.anthropic.com returns 400/401/404/405, not 403 region
    - Telegram messages work (calls may use UDP; verify separately)

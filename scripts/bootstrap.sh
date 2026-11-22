@@ -41,6 +41,7 @@ while (( $# )); do
     --ref) REF=$2; shift 2 ;;
     --env-file) ENV_FILE=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
+    --) shift; PASSTHROUGH+=("$@"); break ;;
     *) PASSTHROUGH+=("$1"); shift ;;
   esac
 done
