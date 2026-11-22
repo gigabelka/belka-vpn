@@ -1,0 +1,5 @@
+# Outbound FOREIGN-Telegram-IP -> "Geosites / GeoIPs (xray)" in Hiddify Manager.
+# Telegram mobile clients connect to data-centre IPs without SNI, so these
+# must be matched by IP. Keep this outbound below FOREIGN-Domains.
+
+geoip:telegram

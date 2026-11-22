@@ -1,0 +1,24 @@
+# Runtime secrets and generated data — never commit
+.env
+.env.*
+!.env.example
+
+# Generated env directory (scripts/configure.sh --output-dir ./env)
+/env/
+*.key
+*.pem
+id_ed25519*
+belka-*.env
+*handoff*.env
+secrets/
+
+# Logs and caches
+*.log
+__pycache__/
+*.swp
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

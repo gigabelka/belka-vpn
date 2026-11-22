@@ -1,0 +1,16 @@
+# Outbound FOREIGN-Domains -> "Geosites / GeoIPs (xray)" in Hiddify Manager.
+# One tag per line.
+#
+# IMPORTANT: do NOT add geoip:google here. Hiddify's Xray template uses
+# domainStrategy IPOnDemand; resolving Google through Russian DNS can return
+# a Russian GGC address and the foreign exit would connect to that address.
+
+geosite:google
+geosite:youtube
+geosite:telegram
+geosite:anthropic
+geosite:openai
+geosite:google-gemini
+geosite:google-deepmind
+geosite:category-ai-chat-!cn
+geosite:category-ai-!cn

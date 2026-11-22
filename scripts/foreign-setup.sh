@@ -1,0 +1,273 @@
+#!/usr/bin/env bash
+# foreign-setup.sh — foreign server: AmneziaWG peer + Xray SOCKS egress + firewall.
+#
+# Run from a checkout of the belka-vpn repository:
+#   bash scripts/foreign-setup.sh --env-file /etc/belka-vpn/foreign.env
+#   bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+#
+# First run creates keys, obfuscation parameters and the FOREIGN handoff file.
+# The RU peer is added on a later run, after the RU public key is known.
+
+set -euo pipefail
+
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
+
+ENV_FILE=${ENV_FILE:-/etc/belka-vpn/foreign.env}
+HANDOFF_IN=""
+RU_PUB_KEY_ARG=""
+UNINSTALL=0
+DRY_RUN=0
+
+usage() {
+  cat <<'EOF'
+Usage: foreign-setup.sh [options]
+
+Options:
+  --env-file FILE   Server env file (default: /etc/belka-vpn/foreign.env)
+  --handoff FILE    RU handoff with RU_PUBLIC_KEY (adds/updates the peer)
+  --ru-pub KEY      RU public key (alternative to --handoff)
+  --uninstall       Stop and remove FOREIGN components (keeps package and keys)
+  --dry-run         Print the plan and exit
+  -h, --help        Show this help
+EOF
+}
+
+parse_args() {
+  while (( $# )); do
+    case "$1" in
+      --env-file) ENV_FILE=$2; shift 2 ;;
+      --handoff) HANDOFF_IN=$2; shift 2 ;;
+      --ru-pub) RU_PUB_KEY_ARG=$2; shift 2 ;;
+      --uninstall) UNINSTALL=1; shift ;;
+      --dry-run) DRY_RUN=1; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) echo "unknown argument: $1" >&2; usage >&2; exit 1 ;;
+    esac
+  done
+}
+
+preflight_foreign() {
+  check_tunnel_conflict
+  if [[ ! -f $AWG_DIR/awg0.conf ]] && port_udp_busy "$AWG_PORT"; then
+    die "UDP/$AWG_PORT is already in use"
+  fi
+  if ss -lntp 2>/dev/null | grep -q ":${SOCKS_PORT} "; then
+    warn "TCP/$SOCKS_PORT is already listening (check for conflicts)"
+  fi
+}
+
+write_foreign_handoff() {
+  local f=/root/belka-foreign-handoff.env
+  write_if_changed "$f" 600 <<EOF
+# belka-vpn FOREIGN handoff — PUBLIC DATA ONLY
+BELKA_ROLE=foreign
+FOREIGN_PUBLIC_IP=${FOREIGN_PUBLIC_IP}
+RU_PUBLIC_IP=${RU_PUBLIC_IP}
+AWG_PORT=${AWG_PORT}
+TUNNEL_NET=${TUNNEL_NET}
+FOREIGN_TUNNEL_IP=${FOREIGN_TUNNEL_IP}
+RU_TUNNEL_IP=${RU_TUNNEL_IP}
+SOCKS_PORT=${SOCKS_PORT}
+AWG_MTU=${AWG_MTU}
+REALITY_SNI=${REALITY_SNI}
+FOREIGN_PUBLIC_KEY=$(cat "$KEY_DIR/public.key")
+AWG_JC=${AWG_JC}
+AWG_JMIN=${AWG_JMIN}
+AWG_JMAX=${AWG_JMAX}
+AWG_S1=${AWG_S1}
+AWG_S2=${AWG_S2}
+AWG_S3=${AWG_S3:-0}
+AWG_S4=${AWG_S4:-0}
+AWG_H1=${AWG_H1}
+AWG_H2=${AWG_H2}
+AWG_H3=${AWG_H3}
+AWG_H4=${AWG_H4}
+EOF
+  log INFO "FOREIGN handoff written: $f (0600)"
+}
+
+render_foreign_awg() {
+  export FOREIGN_TUNNEL_IP AWG_PORT AWG_MTU RU_TUNNEL_IP RU_PUBLIC_KEY
+  export FOREIGN_PRIVATE_KEY OBF_LINES
+  FOREIGN_PRIVATE_KEY=$(cat "$KEY_DIR/private.key")
+  OBF_LINES=$(emit_obf)
+
+  local tmp
+  tmp=$(mktemp)
+  envsubst < "$SCRIPT_DIR/../config/foreign/awg0.conf.tpl" > "$tmp"
+  if [[ -n $RU_PUBLIC_KEY ]]; then
+    envsubst < "$SCRIPT_DIR/../config/foreign/awg0-peer.tpl" >> "$tmp"
+  fi
+  write_if_changed "$AWG_DIR/awg0.conf" 600 < "$tmp"
+  rm -f "$tmp"
+  chmod 600 "$AWG_DIR/awg0.conf"
+  if [[ -n $RU_PUBLIC_KEY ]]; then
+    log INFO "rendered $AWG_DIR/awg0.conf (RU peer present)"
+  else
+    log INFO "rendered $AWG_DIR/awg0.conf (RU peer not set yet)"
+  fi
+}
+
+start_awg() {
+  systemctl enable awg-quick@awg0 >>"$LOG" 2>&1 || true
+  if (( TEMPLATE_CHANGED )) || ! systemctl is-active -q awg-quick@awg0; then
+    systemctl restart awg-quick@awg0 >>"$LOG" 2>&1 \
+      || die "awg-quick@awg0 failed; check: journalctl -u awg-quick@awg0 -n 100"
+    log INFO "awg-quick@awg0 restarted"
+  else
+    log INFO "awg-quick@awg0 unchanged and active"
+  fi
+  awg show >>"$LOG" 2>&1 || true
+}
+
+install_xray() {
+  if [[ ! -x /usr/local/bin/xray ]]; then
+    local installer=/root/.cache/belka/xray-install.sh
+    download_file https://github.com/XTLS/Xray-install/raw/main/install-release.sh "$installer"
+    bash "$installer" @ install >>"$LOG" 2>&1 || die "Xray install failed"
+  fi
+  [[ -x /usr/local/bin/xray ]] || die "xray binary not found"
+  systemctl cat xray >/dev/null 2>&1 || die "xray.service not found after install"
+  install -d -m 755 /usr/local/etc/xray /etc/systemd/system/xray.service.d
+}
+
+render_xray() {
+  export FOREIGN_TUNNEL_IP SOCKS_PORT
+  render_template "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
+    /usr/local/etc/xray/config.json 644
+  local cfg_changed=$TEMPLATE_CHANGED
+
+  /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json >>"$LOG" 2>&1 \
+    || die "xray config test failed"
+
+  write_if_changed /etc/systemd/system/xray.service.d/10-awg.conf 644 <<'EOF'
+[Unit]
+After=awg-quick@awg0.service
+Wants=awg-quick@awg0.service
+EOF
+  local unit_changed=$TEMPLATE_CHANGED
+  systemctl daemon-reload
+
+  if (( cfg_changed || unit_changed )); then
+    TEMPLATE_CHANGED=1
+  else
+    TEMPLATE_CHANGED=0
+  fi
+  systemctl enable xray >>"$LOG" 2>&1 || true
+  log INFO "rendered /usr/local/etc/xray/config.json"
+}
+
+start_xray() {
+  if (( TEMPLATE_CHANGED )) || ! systemctl is-active -q xray; then
+    systemctl restart xray >>"$LOG" 2>&1 \
+      || die "xray failed to start; check: journalctl -u xray -n 100"
+    log INFO "xray restarted"
+  else
+    log INFO "xray unchanged and active"
+  fi
+}
+
+setup_firewall_foreign() {
+  if [[ ${ENABLE_UFW:-1} != 1 ]]; then
+    log INFO "UFW disabled by env"
+    return 0
+  fi
+  ufw --force default deny incoming >>"$LOG" 2>&1
+  ufw --force default allow outgoing >>"$LOG" 2>&1
+  ufw_limit "$SSH_PORT/tcp"
+  ufw_allow from "$RU_PUBLIC_IP" to any port "$AWG_PORT" proto udp
+  ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto tcp
+  ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto udp
+  ufw --force enable >>"$LOG" 2>&1
+  ufw status verbose >>"$LOG" 2>&1 || true
+  log INFO "UFW enabled: SSH, UDP/$AWG_PORT from $RU_PUBLIC_IP, SOCKS only on awg0"
+}
+
+summary_foreign() {
+  log INFO "FOREIGN setup complete"
+  cat >&3 <<EOF
+FOREIGN readiness
+  awg0:        ${FOREIGN_TUNNEL_IP}/24, UDP/${AWG_PORT} (RU peer: ${RU_PUBLIC_KEY:+present}${RU_PUBLIC_KEY:-absent})
+  xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
+  handoff:     /root/belka-foreign-handoff.env
+
+Next steps
+  1) Copy the FOREIGN handoff to the RU server (public data only):
+     scp -i <key> root@${FOREIGN_PUBLIC_IP}:/root/belka-foreign-handoff.env /tmp/belka-foreign-handoff.env
+     scp -i <key> /tmp/belka-foreign-handoff.env root@${RU_PUBLIC_IP}:/root/belka-foreign-handoff.env
+  2) On RU: bash scripts/ru-setup.sh --handoff /root/belka-foreign-handoff.env
+  3) Copy /root/belka-ru-handoff.env from RU to FOREIGN and run:
+     bash scripts/foreign-setup.sh --handoff /root/belka-ru-handoff.env
+EOF
+}
+
+uninstall_foreign() {
+  log INFO "uninstalling FOREIGN components (packages and keys are kept)"
+  systemctl disable --now xray 2>/dev/null || true
+  rm -f /etc/systemd/system/xray.service.d/10-awg.conf
+  systemctl daemon-reload || true
+  systemctl disable --now awg-quick@awg0 2>/dev/null || true
+  rm -f "$AWG_DIR/awg0.conf"
+  if [[ ${ENABLE_UFW:-1} == 1 ]]; then
+    ufw --force delete allow from "${RU_PUBLIC_IP:-}" to any port "$AWG_PORT" proto udp 2>/dev/null || true
+    ufw --force delete allow in on awg0 from "${RU_TUNNEL_IP:-}" to "${FOREIGN_TUNNEL_IP:-}" port "$SOCKS_PORT" proto tcp 2>/dev/null || true
+    ufw --force delete allow in on awg0 from "${RU_TUNNEL_IP:-}" to "${FOREIGN_TUNNEL_IP:-}" port "$SOCKS_PORT" proto udp 2>/dev/null || true
+  fi
+  log INFO "FOREIGN components stopped/removed"
+}
+
+main() {
+  parse_args "$@"
+  belka_init foreign
+  need_root
+  check_os
+  load_env_file "$ENV_FILE" || warn "env file not found: $ENV_FILE"
+  apply_defaults
+
+  : "${FOREIGN_PUBLIC_IP:?FOREIGN_PUBLIC_IP is required (set it in $ENV_FILE)}"
+  : "${RU_PUBLIC_IP:?RU_PUBLIC_IP is required (set it in $ENV_FILE)}"
+
+  if (( UNINSTALL )); then
+    uninstall_foreign
+    exit 0
+  fi
+
+  if (( DRY_RUN )); then
+    log INFO "dry-run: would install AmneziaWG + Xray, write $AWG_DIR/awg0.conf,"
+    log INFO "dry-run: open UDP/$AWG_PORT from $RU_PUBLIC_IP and TCP+UDP/$SOCKS_PORT on awg0"
+    exit 0
+  fi
+
+  install_base_packages
+  preflight_foreign
+  install_amneziawg
+  gen_keypair
+  load_or_gen_obfuscation
+
+  # RU public key: explicit argument > handoff file > stored handoff.
+  if [[ -n $HANDOFF_IN ]]; then
+    load_handoff "$HANDOFF_IN"
+    install -D -m 600 "$HANDOFF_IN" "$BELKA_CONFIG_DIR/ru-handoff.env"
+  elif [[ -r $BELKA_CONFIG_DIR/ru-handoff.env ]]; then
+    load_handoff "$BELKA_CONFIG_DIR/ru-handoff.env"
+  fi
+  if [[ -n $RU_PUB_KEY_ARG ]]; then
+    RU_PUBLIC_KEY=$RU_PUB_KEY_ARG
+  fi
+  export RU_PUBLIC_KEY="${RU_PUBLIC_KEY:-}"
+
+  write_foreign_handoff
+  render_foreign_awg
+  start_awg
+  install_xray
+  render_xray
+  start_xray
+  setup_firewall_foreign
+  setup_fail2ban
+  harden_ssh
+  summary_foreign
+}
+
+main "$@"

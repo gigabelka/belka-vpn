@@ -1,0 +1,42 @@
+# Outbound FOREIGN-Domains -> "Sites" in Hiddify Manager.
+# One domain per line; Hiddify matches subdomains too.
+# Do NOT add these to FOREIGN-Telegram-IP.
+
+# Claude / Anthropic (official Claude Code network config)
+anthropic.com
+claude.ai
+claude.com
+claudeusercontent.com
+platform.claude.com
+sso.claude.com
+mcp-proxy.anthropic.com
+downloads.claude.ai
+accounts.google.com
+
+# Other AI services
+openai.com
+chatgpt.com
+oaistatic.com
+oaiusercontent.com
+perplexity.ai
+x.ai
+
+# Google / YouTube
+google.com
+googleapis.com
+gstatic.com
+googleusercontent.com
+googlevideo.com
+youtube.com
+youtu.be
+ytimg.com
+ggpht.com
+googlesource.com
+
+# Telegram domains (IP ranges go to FOREIGN-Telegram-IP)
+telegram.org
+telegram.me
+t.me
+telegra.ph
+telesco.pe
+web.telegram.org
