@@ -75,6 +75,116 @@ check_awg() {
   fi
 }
 
+check_hiddify_routing() {
+  local cfg=/opt/hiddify-manager/generated/xray.json
+  [[ -d /opt/hiddify-manager ]] || return 0
+  if [[ ! -r $cfg ]]; then
+    warn "Hiddify xray config not found: $cfg (panel not applied yet?)"
+    return 0
+  fi
+  if ! command -v jq >/dev/null 2>&1; then
+    warn "jq not found; skipping Hiddify routing checks"
+    return 0
+  fi
+  if ! jq -e . "$cfg" >/dev/null 2>&1; then
+    bad "Hiddify generated xray config is not valid JSON"
+    return 0
+  fi
+
+  # Hiddify 14.x writes SOCKS endpoints as settings.address/port and tags them socks-<id>;
+  # older layouts use settings.servers[0]. Support both.
+  local socks_count socks_tags tags_json tag domain_count telegram_count
+  local domain_idx telegram_idx
+  socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
+    [.outbounds[]?
+     | select(.protocol == "socks")
+     | select((.settings.address // (.settings.servers // [])[0].address // "") == $ip)
+     | select(((.settings.port // (.settings.servers // [])[0].port // "") | tostring) == $port)
+    ] | length' "$cfg")
+  socks_tags=$(jq -r --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
+    .outbounds[]?
+    | select(.protocol == "socks")
+    | select((.settings.address // (.settings.servers // [])[0].address // "") == $ip)
+    | select(((.settings.port // (.settings.servers // [])[0].port // "") | tostring) == $port)
+    | .tag // empty' "$cfg")
+  tags_json=$(printf '%s\n' "$socks_tags" | jq -R . | jq -s 'map(select(length > 0))')
+
+  if (( socks_count >= 2 )); then
+    ok "Hiddify has ${socks_count} SOCKS outbound(s) to ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
+  else
+    bad "Hiddify has ${socks_count} SOCKS outbound(s) to ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (expected 2)"
+  fi
+
+  while IFS= read -r tag; do
+    [[ -n $tag ]] || continue
+    if jq -e --arg t "$tag" '
+        [.routing.rules[]?
+         | select(.outboundTag == $t)
+         | select((((.domain // []) | length) > 0) or (((.ip // []) | length) > 0))
+        ] | length > 0' "$cfg" >/dev/null 2>&1; then
+      ok "Hiddify routing rule for outbound ${tag}"
+    else
+      bad "Hiddify has no routing rule for outbound ${tag}"
+    fi
+  done <<< "$socks_tags"
+
+  domain_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | select(((.domain // []) | length) > 0)
+    ] | length' "$cfg")
+  if (( domain_count > 0 )); then
+    ok "Hiddify routes domain/geosite lists to a SOCKS outbound"
+  else
+    bad "Hiddify has no domain/geosite rule pointing to a SOCKS outbound"
+  fi
+
+  telegram_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | select(((.ip // []) | index("geoip:telegram")) != null)
+    ] | length' "$cfg")
+  if (( telegram_count > 0 )); then
+    ok "Hiddify routes geoip:telegram to a SOCKS outbound"
+  else
+    bad "Hiddify has no geoip:telegram rule pointing to a SOCKS outbound"
+  fi
+
+  domain_idx=$(jq --argjson tags "$tags_json" '
+    [.routing.rules | to_entries[]?
+     | select(.value.outboundTag as $t | ($tags | index($t // "")) != null)
+     | select(((.value.domain // []) | length) > 0)
+     | .key] | min // -1' "$cfg")
+  telegram_idx=$(jq '
+    [.routing.rules | to_entries[]?
+     | select(((.value.ip // []) | index("geoip:telegram")) != null)
+     | .key] | min // -1' "$cfg")
+  if [[ $domain_idx != -1 && $telegram_idx != -1 ]] && (( domain_idx < telegram_idx )); then
+    ok "Hiddify rule order: domain lists are matched before geoip:telegram"
+  else
+    bad "Hiddify rule order is wrong: domain lists must be matched before geoip:telegram"
+  fi
+
+  if jq -e '
+      [.routing.rules[]? | ((.domain // [])[]), ((.ip // [])[])
+       | select(. == "geoip:google")] | length > 0' "$cfg" >/dev/null 2>&1; then
+    bad "Hiddify routing contains geoip:google (forbidden)"
+  else
+    ok "Hiddify routing does not use geoip:google"
+  fi
+
+  if jq -e '
+      [.inbounds[]?
+       | select(.protocol == "vless"
+                and (.sniffing.enabled // false)
+                and ((.sniffing.routeOnly // false) == false))
+      ] | length > 0' "$cfg" >/dev/null 2>&1; then
+    ok "Hiddify VLESS inbound sniffs SNI (routeOnly=false)"
+  else
+    bad "Hiddify VLESS inbounds do not sniff SNI with routeOnly=false"
+  fi
+}
+
 check_foreign() {
   check_awg
   if systemctl is-active -q xray; then
@@ -101,6 +211,7 @@ check_foreign() {
 
 check_ru() {
   check_awg
+  check_hiddify_routing
 
   if timeout 5 bash -c "</dev/tcp/${FOREIGN_TUNNEL_IP}/${SOCKS_PORT}" 2>/dev/null; then
     ok "SOCKS TCP reachable at ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
