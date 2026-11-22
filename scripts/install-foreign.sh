@@ -126,7 +126,7 @@ install_xray() {
   if [[ ! -x /usr/local/bin/xray ]]; then
     local installer=/root/.cache/belka/xray-install.sh
     download_file https://github.com/XTLS/Xray-install/raw/main/install-release.sh "$installer"
-    bash "$installer" @ install >>"$LOG" 2>&1 || die "Xray install failed"
+    bash "$installer" install >>"$LOG" 2>&1 || die "Xray install failed"
   fi
   [[ -x /usr/local/bin/xray ]] || die "xray binary not found"
   systemctl cat xray >/dev/null 2>&1 || die "xray.service not found after install"

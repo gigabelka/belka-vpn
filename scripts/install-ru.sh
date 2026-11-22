@@ -79,10 +79,24 @@ install_hiddify() {
 
   # Installer output may contain the admin link, which is a secret.
   # Keep it out of the main log and the chat output.
-  if ! DEBIAN_FRONTEND=noninteractive bash "$installer" </dev/null >"$out" 2>&1; then
-    log ERROR "Hiddify installer failed; see $out"
-    tail -n 20 "$out" | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' >&3 || true
-    die "Hiddify install failed"
+  # The Hiddify installer expects the default 022 umask: under lib.sh's 077
+  # it creates /opt/hiddify-manager as 0700 root and the service users cannot
+  # traverse it. Run it in a subshell with a normal umask and a TERM.
+  local rc=0
+  ( umask 022; TERM=xterm DEBIAN_FRONTEND=noninteractive \
+      bash "$installer" </dev/null >"$out" 2>&1 ) || rc=$?
+  if (( rc != 0 )); then
+    # WARP (usque) registration is often unreachable from Russia and returns
+    # non-zero even though the panel finished. Treat that as success only when
+    # the panel really is installed; we keep WARP off in this deployment.
+    if [[ -f /opt/hiddify-manager/data/hiddify-panel/app.cfg ]] \
+      && systemctl is-enabled -q hiddify-panel 2>/dev/null; then
+      warn "Hiddify installer exited $rc but the panel is installed (likely WARP registration); continuing"
+    else
+      log ERROR "Hiddify installer failed; see $out"
+      tail -n 20 "$out" | sed -E 's/[A-Za-z0-9_-]{24,}/<redacted>/g' >&3 || true
+      die "Hiddify install failed"
+    fi
   fi
   [[ -d /opt/hiddify-manager ]] || die "Hiddify install finished but /opt/hiddify-manager is missing"
   log INFO "Hiddify Manager installed; admin link: run 'hiddify admin' on the server"
