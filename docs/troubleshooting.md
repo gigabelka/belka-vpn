@@ -323,6 +323,22 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 - **Порты 80/443 заняты**: Hiddify нужны оба; освободите или не устанавливайте
   Hiddify (`INSTALL_HIDDIFY=0`).
 
+## Не работают WireGuard или WARP в Hiddify на RU
+
+`install-ru.sh` выключает пересылку пакетов (`ip_forward`) на RU файлом
+`/etc/sysctl.d/zz-belka-no-forward.conf`: схеме belka-vpn она не нужна, трафик в
+FOREIGN идёт через SOCKS. Hiddify сам включает пересылку при каждой установке, а
+установщик Hiddify запускается при каждой загрузке. Поэтому файл назван так, чтобы
+применяться после `hiddify.conf` и `wg.conf`: sysctl читает файлы по алфавиту, и
+побеждает последнее значение.
+
+WireGuard и WARP в Hiddify без пересылки не работают. Чтобы их включить:
+
+1. Поставьте `RU_IP_FORWARD=1` в `/etc/belka-vpn/ru.env`.
+2. Перезапустите `install-ru.sh` — он удалит файл. Либо удалите файл вручную и
+   выполните `sysctl --system`.
+3. Проверка: `sysctl net.ipv4.ip_forward` должно показать `1`.
+
 ## Сломался SSH после hardening
 
 `HARDEN_SSH=1` включает запрет пароля. Если ключ не был добавлен:

@@ -76,6 +76,38 @@ EOF
   fi
 }
 
+# Hiddify Manager re-enables IP forwarding on every install (its installer runs
+# at each boot): /etc/sysctl.d/hiddify.conf and, after its WireGuard was ever
+# enabled, wg.conf. The split tunnel uses SOCKS, so RU never forwards packets.
+# sysctl.d applies files in lexical order and the last value wins, so the
+# override must sort after hiddify.conf and wg.conf.
+configure_ip_forwarding() {
+  local conf=/etc/sysctl.d/zz-belka-no-forward.conf
+  if [[ ${RU_IP_FORWARD:-0} == 1 ]]; then
+    if [[ -e $conf ]]; then
+      rm -f "$conf"
+      sysctl --system >>"$LOG" 2>&1 || warn "sysctl --system reported errors"
+      log INFO "IP forwarding override removed (RU_IP_FORWARD=1)"
+    fi
+    return 0
+  fi
+  write_if_changed "$conf" 644 <<'EOF'
+# belka-vpn: RU needs no IP forwarding (FOREIGN is reached over SOCKS).
+# Hiddify's WireGuard and WARP do need it: set RU_IP_FORWARD=1 in ru.env and
+# rerun install-ru.sh, or delete this file and run `sysctl --system`.
+net.ipv4.ip_forward = 0
+net.ipv6.conf.all.forwarding = 0
+EOF
+  if (( TEMPLATE_CHANGED )) || [[ $(sysctl -n net.ipv4.ip_forward) != 0 ]]; then
+    sysctl --system >>"$LOG" 2>&1 || warn "sysctl --system reported errors"
+  fi
+  if [[ $(sysctl -n net.ipv4.ip_forward) != 0 ]]; then
+    warn "IP forwarding is still on; another sysctl file sorts after $conf"
+  else
+    log INFO "IP forwarding disabled"
+  fi
+}
+
 activate_hiddify_core_compat() {
   [[ -d /opt/hiddify-manager ]] || return 0
   systemctl daemon-reload >>"$LOG" 2>&1 || true
@@ -225,6 +257,11 @@ uninstall_ru() {
   log INFO "uninstalling RU tunnel components (Hiddify Manager is kept)"
   systemctl disable --now awg-quick@awg0 2>/dev/null || true
   rm -f "$AWG_DIR/awg0.conf"
+  # Hand IP forwarding back to Hiddify's own sysctl files.
+  if [[ -e /etc/sysctl.d/zz-belka-no-forward.conf ]]; then
+    rm -f /etc/sysctl.d/zz-belka-no-forward.conf
+    sysctl --system >>"$LOG" 2>&1 || true
+  fi
   if [[ -x /opt/hiddify-manager/uninstall.sh ]]; then
     warn "to remove Hiddify Manager manually: bash /opt/hiddify-manager/uninstall.sh"
   fi
@@ -249,7 +286,8 @@ main() {
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write the hiddify-core compatibility drop-in,"
-    log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT and print the manual checklist"
+    log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT, set IP forwarding (RU_IP_FORWARD=$RU_IP_FORWARD)"
+    log INFO "dry-run: and print the manual checklist"
     exit 0
   fi
 
@@ -302,6 +340,7 @@ EOF
   write_ru_handoff
   render_ru_awg
   start_awg
+  configure_ip_forwarding
   # Hiddify Manager owns the RU firewall: ban via blackhole routes, not iptables.
   setup_fail2ban route
   write_checklist
