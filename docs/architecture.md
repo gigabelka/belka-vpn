@@ -47,6 +47,21 @@ Hiddify Manager (v14.5) собирает Xray-конфиг с `domainStrategy: I
 
 `geoip:google` намеренно не используется. Google Play/сервисы, которые ходят по IP без SNI, могут остаться Direct — это осознанный компромисс.
 
+### Границы доменной маршрутизации
+
+Поле Sites/Geosites в Hiddify Manager (Xray) принимает домены и `geosite:`/`geoip:`,
+но не CIDR; rule-sets доступны только в hiddify-core, а Common Proxy Core обязан
+быть Xray. Поэтому «прокинуть все IP» нельзя: `google.com` и `googleapis.com`
+покрывают поддомены, а зоны `.google`, `.goog`, `.studio` (`gemini.google`,
+`ai.studio`, `ai.google.dev`, `antigravity.google`, …) перечислены в
+`config/rules/foreign-domains.txt` явно — иначе они уходили бы Direct и Google
+видел бы разные exit-IP. `geosite:google-gemini` (`google-deepmind`) — резерв, но
+зависит от версии geo-файлов.
+
+Доменные правила не ловят соединения «голым IP» без SNI и трафик с ECH/DoH; это
+ограничение клиента. Смену страны exit-IP и страну Google-аккаунта маршрутизация
+не исправляет — см. `docs/troubleshooting.md`.
+
 ## Common Proxy Core = Xray
 
 В Hiddify Manager v14.5:

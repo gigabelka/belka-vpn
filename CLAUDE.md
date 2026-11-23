@@ -94,6 +94,12 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Telegram-IP`
   (`geoip:telegram`), then `Direct`. The split avoids `domainStrategy: IPOnDemand`
   resolving a Google domain through Russian DNS first.
+- `google.com`/`googleapis.com` cover subdomains, but Google AI hosts in the
+  `.google`, `.goog` and `.studio` zones (`gemini.google`, `ai.studio`,
+  `generativeai.google`, `antigravity.google`, …) are listed explicitly in
+  `config/rules/foreign-domains.txt`; `geosite:google` does not cover them.
+  `verify.sh` checks that coverage. Signed-in Gemini is gated by Google's
+  exit-IP country and the account country, not by routing.
 - Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
   rewriting (`routeOnly=false`, sniffing `http/tls/quic`) only work there.
 - Handoff exchange is circular and public-only: the first run of each role emits

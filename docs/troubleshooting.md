@@ -110,6 +110,30 @@ curl -s -o /dev/null -w '%{http_code}\n' --socks5-hostname 172.16.0.1:1080 \
 VPN обязательно перезагрузите вкладку: соединения, открытые до туннеля, идут
 напрямую.
 
+### Две причины блока
+
+Признак «без входа открывается, со входом — „не поддерживается в вашей стране“»
+означает, что домен до FOREIGN доходит; Google решает по стране exit-IP и стране
+аккаунта. Порядок проверки:
+
+1. **Разные exit-IP у сервисов Google** («traffic anomaly, ip A ≠ B»). Часть
+   Google-хостов уходит Direct с российским IP. `google.com` и `geosite:google`
+   **не** покрывают зоны `.google`, `.goog`, `.studio`: `gemini.google`,
+   `ai.studio`, `generativeai.google`, `notebook.google`, `jules.google`,
+   `flow.google`, `opal.google`, `antigravity.google`, `antigravity-unleash.goog`.
+   Убедитесь, что в Sites вставлен весь `/root/belka-foreign-domains.txt`;
+   `verify.sh` проверяет покрытие этих хостов по сгенерированному конфигу.
+2. **Страна exit-IP (`x-country: ru`)** — Google считает адрес российским, даже
+   когда ipinfo/RIPE показывают другую страну. Смена правил не поможет: нужен
+   другой IP/подсеть/хостер или IPv6-выход (`GOOGLE_IPV6_EGRESS=1`, см. runbook).
+3. **Страна аккаунта = Россия** — нижний колонтитул Условий
+   (`policies.google.com/u/0/terms`) или Play → Country and profiles. Помогает
+   только Country Association Form (дни–недели) или новый аккаунт, созданный через
+   туннель.
+4. **`x-country` не `ru`, аккаунт не российский** — кеш, профиль или ECH:
+   очистите site data `gemini.google.com`, выключите ECH/DoH, перезагрузите
+   вкладку после подключения VPN.
+
 Сначала выясните, доходит ли домен до зарубежного сервера. На FOREIGN (поставьте
 `tcpdump`, если его нет) запустите захват и **затем** откройте новую приватную
 вкладку Gemini:
@@ -158,11 +182,13 @@ jq -r '.routing.rules | to_entries[]
 
 Что делать:
 
-- **Не проксируется.** Панель: Common Proxy Core = Xray; Sites содержит `google.com`
-  (и Gemini-домены из `/root/belka-foreign-domains.txt`); Geosites — `geosite:google`
-  и `geosite:google-gemini`; WARP OFF; порядок FOREIGN-Domains → FOREIGN-Telegram-IP →
-  Direct; Apply. Списки в `/root` уже без комментариев: валидатор Hiddify не принимает
-  строки `#`. Клиент: IPv6 off, DNS remote `1.1.1.1`, Resolve Destination OFF, TUN.
+- **Не проксируется.** Панель: Common Proxy Core = Xray; Sites содержит весь
+  `/root/belka-foreign-domains.txt`, включая `.google`/`.goog`/`.studio`
+  (`gemini.google`, `ai.studio`, `generativeai.google`, `antigravity.google`, …);
+  Geosites — `geosite:google` и `geosite:google-gemini`; WARP OFF; порядок
+  FOREIGN-Domains → FOREIGN-Telegram-IP → Direct; Apply. Списки в `/root` уже без
+  комментариев: валидатор Hiddify не принимает строки `#`. Клиент: IPv6 off, DNS
+  remote `1.1.1.1`, Resolve Destination OFF, TUN.
   В браузере отключите ECH и DoH (при ECH Xray не видит SNI). Очистите site data или
   откройте приватное окно — кеш страницы блокировки переживает фикс.
 - **Проксируется, но Google блокирует exit-IP.** Сторонние базы (`ipinfo.io`,
@@ -198,11 +224,19 @@ jq -r '.routing.rules | to_entries[]
   Исправление — [Google Country Association Form](https://policies.google.com/country-association-form);
   изменения могут занять несколько дней, Play-регион меняется не чаще раза в год. Работает и аккаунт,
   созданный через туннель в поддерживаемой стране (без российского телефона и
-  платёжного профиля). `verify.sh` проверяет только exit-IP — страну аккаунта он
-  не видит.
+  платёжного профиля). `verify.sh` проверяет маршрутизацию Gemini/AI-хостов и
+  страну exit-IP, но страну аккаунта он не видит.
 - **Не делайте:** не добавляйте `geoip:google`; не правьте
   `/opt/hiddify-manager/generated/xray.json` (перезапишется при Apply); не ставьте
   WARP выше Socks.
+
+Почему нельзя «прокинуть все IP»: поле Geosites/GeoIPs в Hiddify Manager (Xray)
+принимает только `geosite:`/`geoip:`, произвольные CIDR туда не вставляются;
+rule-sets работают только в hiddify-core, а Common Proxy Core обязан быть Xray;
+`geoip:google` запрещён (`domainStrategy: IPOnDemand` резолвит Google российским
+DNS). Эквивалент — полный доменный список: RU сниффит SNI и передаёт домен на
+FOREIGN, где он и резолвится. Соединения «голым IP» без SNI и трафик с ECH/DoH
+доменными правилами не ловятся — это ограничение клиента.
 
 `ipinfo.io` в браузере не входит в список FOREIGN и покажет российский IP даже при
 рабочем туннеле. Чтобы проверить выход, временно добавьте `ipinfo.io` в Sites, нажмите

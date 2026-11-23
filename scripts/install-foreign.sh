@@ -236,6 +236,10 @@ EOF
 )
   # YouTube stays on IPv4: video would saturate a tunnel, and the region block
   # this works around is enforced by Gemini, not YouTube.
+  # Google AI hosts in .google/.goog/.studio (and Google's ad/analytics hosts)
+  # are named explicitly: google.com does not cover them, and stale geosite data
+  # would otherwise leave them on IPv4 while the rest of Google uses IPv6.
+  # Keep in sync with the Google AI block in config/rules/foreign-domains.txt.
   XRAY_EXTRA_RULES=$(cat <<'EOF'
 ,
       {
@@ -245,7 +249,25 @@ EOF
       },
       {
         "type": "field",
-        "domain": ["geosite:google", "geosite:google-gemini"],
+        "domain": [
+          "geosite:google",
+          "geosite:google-gemini",
+          "google.dev",
+          "ai.studio",
+          "generativeai.google",
+          "gemini.google",
+          "notebook.google",
+          "notebooklm.google",
+          "jules.google",
+          "flow.google",
+          "opal.google",
+          "antigravity.google",
+          "antigravity-unleash.goog",
+          "withgoogle.com",
+          "googletagmanager.com",
+          "google-analytics.com",
+          "doubleclick.net"
+        ],
         "outboundTag": "google-v6"
       }
 EOF

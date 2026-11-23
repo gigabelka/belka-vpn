@@ -94,7 +94,7 @@ check_hiddify_routing() {
   # Hiddify 14.x writes SOCKS endpoints as settings.address/port and tags them socks-<id>;
   # older layouts use settings.servers[0]. Support both.
   local socks_count socks_tags tags_json tag domain_count google_count google_full_count telegram_count
-  local domain_idx telegram_idx
+  local ai_count domain_idx telegram_idx
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
      | select(.protocol == "socks")
@@ -161,6 +161,25 @@ check_hiddify_routing() {
     bad "Hiddify routes no google.com/geosite:google rule to a SOCKS outbound"
   fi
 
+  # `.google` (brand TLD), ai.studio and *-unleash.goog are NOT covered by
+  # google.com or geosite:google. They must be listed explicitly or come from
+  # geosite:google-gemini; otherwise signed-in Gemini can egress Direct with a
+  # RU address while the rest goes through FOREIGN (mixed IPs).
+  ai_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "geosite:google-gemini" or . == "geosite:google-deepmind"
+              or . == "ai.studio" or . == "domain:ai.studio" or . == "full:ai.studio"
+              or . == "gemini.google" or . == "domain:gemini.google" or . == "full:gemini.google"
+              or . == "generativeai.google" or . == "domain:generativeai.google"
+              or . == "google.dev" or . == "domain:google.dev")] | length' "$cfg")
+  if (( ai_count > 0 )); then
+    ok "Hiddify routes Google AI (.google / ai.studio) hosts to a SOCKS outbound"
+  else
+    warn "Hiddify does not route Google AI hosts (ai.studio, gemini.google, generativeai.google); signed-in Gemini may leave via Direct"
+  fi
+
   telegram_count=$(jq --argjson tags "$tags_json" '
     [.routing.rules[]?
      | select(.outboundTag as $t | ($tags | index($t // "")) != null)
@@ -209,7 +228,7 @@ check_hiddify_routing() {
 
 # Signed-out probe through FOREIGN: checks the exit IP, not Google account eligibility.
 check_gemini() {
-  local country code tmp
+  local country code tmp ai_code ai_tmp
   country=$(curl -4 -fsS --max-time 15 --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
     https://ipinfo.io/country 2>/dev/null | tr -d '[:space:]' || true)
   case "$country" in
@@ -234,13 +253,29 @@ check_gemini() {
     -o "$tmp" -w '%{http_code}' \
     'https://gemini.google.com/?hl=ru' 2>/dev/null || true)
   if grep -aEqi 'not available in your country|not available in your region|недоступен в вашей стране|не поддерживается в вашей стране' "$tmp"; then
-    warn "Gemini shows a region-block page via FOREIGN (check exit IP/account country)"
+    warn "Gemini shows a region-block page via FOREIGN (check exit IP x-country and the Google account country)"
   elif [[ $code == 2* || $code == 3* ]]; then
     ok "Gemini via FOREIGN returns ${code} (exit-level check, no region marker)"
   else
     warn "Gemini via FOREIGN returned ${code:-no response}; check manually"
   fi
   rm -f "$tmp"
+
+  # AI Studio is a second Gemini-family host; it exercises the same exit path
+  # and a different hostname set (ai.studio, aistudio.google.com).
+  ai_tmp=$(mktemp)
+  ai_code=$(curl -4 -sS -L --compressed --max-time 25 \
+    --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+    -o "$ai_tmp" -w '%{http_code}' \
+    'https://aistudio.google.com/' 2>/dev/null || true)
+  if grep -aEqi 'not available in your country|not available in your region|недоступен в вашей стране|не поддерживается в вашей стране' "$ai_tmp"; then
+    warn "AI Studio shows a region-block page via FOREIGN (check exit IP x-country and the Google account country)"
+  elif [[ $ai_code == 2* || $ai_code == 3* ]]; then
+    ok "AI Studio via FOREIGN returns ${ai_code}"
+  else
+    warn "AI Studio via FOREIGN returned ${ai_code:-no response}; check routing and exit IP"
+  fi
+  rm -f "$ai_tmp"
 }
 
 check_foreign() {

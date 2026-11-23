@@ -40,6 +40,14 @@ Reality SNI candidate: ${REALITY_SNI}
       (both /root lists are paste-ready: no comments, no blank lines)
       google.com (domain match) covers gemini.google.com and aistudio.google.com;
       an exact full:google.com does not (verify.sh warns about it)
+      google.com and geosite:google do NOT cover .google-TLD hosts
+      (gemini.google, ai.studio, generativeai.google, jules.google, flow.google,
+      opal.google, notebook.google, antigravity.google), antigravity-unleash.goog
+      or withgoogle.com. Keep the explicit lines from the /root list, or add
+      geosite:google-gemini (requires fresh geo files).
+      Signed-in Gemini needs one exit IP for all Google hosts: a host left on
+      Direct makes Google see mixed IPs and can show "not supported in your
+      country" even when incognito works.
       Domestic sites of Iran/Russia: OFF
       Rule-sets (hiddify-core): empty (Common Proxy Core = Xray)
       *** Do NOT add geoip:google here. ***
@@ -83,6 +91,13 @@ Reality SNI candidate: ${REALITY_SNI}
    - youtube.com, google.com, claude.ai -> through FOREIGN
    - gemini.google.com opens without "not available in your country"
      (signed out; an account with RU country stays blocked by account country)
+     Signed-in "not supported in your country" while incognito works is not a
+     routing bug first: check Google's country for the exit IP and the account
+     country before touching the rules (docs/troubleshooting.md).
+       curl -4 -sS -o /dev/null -D - --socks5-hostname 172.16.0.1:1080 \
+         'https://clientservices.googleapis.com/chrome-variations/seed?osname=win&channel=stable&milestone=140' \
+         | grep -i '^x-country'
+       Account country: footer of https://policies.google.com/u/0/terms
    - Russian sites -> Direct (RU IP)
    - api.anthropic.com returns 400/401/404/405, not 403 region
    - Telegram messages work (calls may use UDP; verify separately)

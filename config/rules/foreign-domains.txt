@@ -47,6 +47,28 @@ notebooklm.google.com
 generativelanguage.googleapis.com
 content-push.googleapis.com
 
+# `.google` is a brand TLD and `ai.studio` is a separate TLD: google.com does
+# NOT cover them. geosite:google-gemini (google-deepmind) does, but geo files
+# can lag behind, and then these hosts would leave via Direct with a RU IP.
+# Signed-in Gemini requires every Google request to use the same exit IP.
+google.dev
+ai.studio
+generativeai.google
+gemini.google
+notebook.google
+notebooklm.google
+jules.google
+flow.google
+opal.google
+antigravity.google
+antigravity-unleash.goog
+
+# Official Gemini App firewall hosts not covered by google.com.
+withgoogle.com
+googletagmanager.com
+google-analytics.com
+doubleclick.net
+
 # Telegram domains (IP ranges go to FOREIGN-Telegram-IP)
 telegram.org
 telegram.me
