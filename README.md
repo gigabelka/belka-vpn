@@ -40,6 +40,7 @@ config/
   client/            # Direct-список и инверсный AllowedIPs для клиента Hiddify app
 docs/
   architecture.md    # подробная схема и обоснование
+  hiddify-client.md  # клиент Hiddify app: настройка, Direct-правило, AllowedIPs
   runbook.md         # пошаговое развёртывание
   troubleshooting.md # типовые проблемы
 tests/lint.sh        # bash -n, shellcheck, запрет реальных IP и устаревших имён
@@ -202,6 +203,9 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 - DNS — remote `1.1.1.1` через прокси;
 - Resolve Destination — **OFF**;
 - на десктопе — **TUN/VPN mode** (Claude Code не поддерживает SOCKS).
+
+Подробная пошаговая инструкция (импорт, Direct-правило, `AllowedIPs`, «Строгая
+маршрутизация», проверка) — `docs/hiddify-client.md`.
 
 #### Адреса в обход VPN
 

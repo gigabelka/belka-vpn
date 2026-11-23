@@ -163,4 +163,6 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 - Hiddify Manager removal is intentionally manual and destructive; `install-ru.sh
   --uninstall` leaves it installed.
 - Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
-  order), `docs/troubleshooting.md` (diagnosis), and the Russian README quick start.
+  order), `docs/hiddify-client.md` (Hiddify app setup, Direct rule, AllowedIPs,
+  strict route), `docs/troubleshooting.md` (diagnosis), and the Russian README quick
+  start.
