@@ -133,6 +133,13 @@ else
   note "ok   no legacy FI names"
 fi
 
+# 6b. No references to the hosting provider HOSTKEY (removed from the project).
+if scan_grep -n -i --exclude='lint.sh' -E 'host[-_ ]?key|[хХ]ост-?кей|ХОСТ-?КЕЙ'; then
+  fail "hostkey references found (see lines above)"
+else
+  note "ok   no hostkey references"
+fi
+
 # 7. Required IPs in examples must be empty (user supplies them)
 for f in .env.example scripts/env/ru.env.example scripts/env/foreign.env.example; do
   if [[ ! -r $f ]]; then

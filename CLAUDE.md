@@ -46,7 +46,8 @@ bash -n scripts/lib.sh      # single-file syntax check
 
 `tests/lint.sh` runs `bash -n` on all scripts, `shellcheck -S error` when installed,
 required-template checks, secret scans, `.gitignore` coverage, the public-IPv4 allowlist,
-and the ban on legacy `fi*` / Finnish names and on the old setup-script filenames. The
+and the ban on legacy `fi*` / Finnish names, on the old setup-script filenames, and on any
+reference to the removed hosting provider (pattern in check 6b of `tests/lint.sh`). The
 IPv4 allowlist scan exempts only `config/client/hiddify-allowedips.txt` (a routing list);
 that file is checked separately to contain nothing but CIDR lines.
 Content scans cover only git-visible files (tracked plus untracked-not-ignored), so
