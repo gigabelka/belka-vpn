@@ -231,6 +231,19 @@ check_hiddify_routing() {
     bad "Hiddify rule order is wrong: domain lists must be matched before geoip:google"
   fi
 
+  # Block with "Domestic sites" ON emits geoip:ru / domain:ru -> blackhole, so
+  # Russian sites stop working instead of leaving via Direct.
+  if jq -e '
+      [.routing.rules[]?
+       | select(.outboundTag == "blackhole")
+       | ((.ip // [])[]), ((.domain // [])[])
+       | select(. == "geoip:ru" or . == "domain:ru" or . == "geosite:category-ru")
+      ] | length > 0' "$cfg" >/dev/null 2>&1; then
+    bad "Hiddify blocks Russian sites (geoip:ru/domain:ru -> blackhole); turn off Domestic sites on the Block outbound"
+  else
+    ok "Hiddify does not blackhole Russian sites (Block: Domestic sites OFF)"
+  fi
+
   if jq -e '
       [.inbounds[]?
        | select(.protocol == "vless"

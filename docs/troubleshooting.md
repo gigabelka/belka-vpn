@@ -263,7 +263,9 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 - **Неизвестный geosite-тег** (`geosite:anthropic`, `category-ai-!cn` могут
   отсутствовать в вашей версии). Уберите тег, оставьте домены.
 - **Порядок outbounds**: WARP/Block выше Socks перехватывают трафик. WARP
-  выключить, Block — без списков.
+  выключить, Block — без списков и с выключенным «Domestic sites»: иначе
+  `geoip:ru`/`domain:ru` уходят в blackhole и российские сайты не открываются
+  (`verify.sh` это проверяет).
 - **`hiddify-core` перезапускается каждые 5 секунд** (`status=1`, journal
   пуст): смотрите `/opt/hiddify-manager/data/log/hiddify-core.err.log`. Если
   там `implicit default HTTP client ... deprecated`, новое ядро sing-box

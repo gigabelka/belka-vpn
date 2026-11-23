@@ -73,7 +73,8 @@ Reality SNI candidate: ${REALITY_SNI}
       3. FOREIGN-Telegram-IP
       4. Direct  (last, enabled, default)
    Disable WARP (its openai rules can intercept AI traffic).
-   Block: leave without lists.
+   Block: leave without lists, and Domestic sites of Iran/Russia OFF
+   (otherwise geoip:ru and domain:ru go to blackhole and Russian sites break).
 
 5) Actions -> Apply now
 
