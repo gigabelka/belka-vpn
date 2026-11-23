@@ -3,13 +3,13 @@
 Двухсерверный VPN с разделением трафика:
 
 - клиенты (Hiddify app) подключаются **только к российскому серверу** по VLESS + Reality;
-- российский сервер отправляет YouTube, Telegram, сервисы Google, Claude/Anthropic и прочий AI через **зарубежный сервер**;
+- российский сервер отправляет YouTube, Telegram, сервисы Google, Claude/Anthropic, прочий AI, а также заблокированные в РФ рутрекер/рутор и Instagram через **зарубежный сервер**;
 - весь остальной трафик выходит напрямую из России;
 - между серверами — **AmneziaWG** (UDP), на зарубежной стороне — SOCKS5 только на адресе тоннеля.
 
 ```text
 Hiddify app ──VLESS+Reality/443──► RU <RU_PUBLIC_IP> (Hiddify Manager)
-                                     ├─ 1. FOREIGN-Domains: домены + geosite (youtube/google/telegram/anthropic/openai)
+                                     ├─ 1. FOREIGN-Domains: домены + geosite (youtube/google/telegram/anthropic/openai, rutracker/rutor/instagram)
                                      │        └─ Socks ──► 172.16.0.1:1080 (FOREIGN Xray)
                                      ├─ 2. FOREIGN-Telegram-IP: geoip:telegram
                                      │        └─ Socks ──► 172.16.0.1:1080  [внутри AmneziaWG/UDP]
@@ -233,6 +233,7 @@ bash scripts/verify.sh --role foreign
 - handshake AmneziaWG свежий;
 - `curl --socks5-hostname 172.16.0.1:1080 https://api.ipify.org` → зарубежный IP;
 - YouTube через зарубежный сервер → 204;
+- rutracker.org, rutor.info и instagram.com открываются через зарубежный сервер (медиа Instagram грузится);
 - `gemini.google.com` не показывает «недоступно в вашей стране»;
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
 - в клиенте `ipinfo.io` → российский IP, а YouTube/Google/Claude идут через зарубежный сервер.

@@ -187,7 +187,8 @@ jq -r '.routing.rules | to_entries[]
 
 - **Не проксируется.** Панель: Common Proxy Core = Xray; Sites содержит весь
   `/root/belka-foreign-domains.txt`, включая `.google`/`.goog`/`.studio`
-  (`gemini.google`, `ai.studio`, `generativeai.google`, `antigravity.google`, …);
+  (`gemini.google`, `ai.studio`, `generativeai.google`, `antigravity.google`, …),
+  а также `rutracker.org`, `rutor.info` и `instagram.com` с CDN;
   Geosites — `geosite:google` и `geosite:google-gemini`; WARP OFF; порядок
   FOREIGN-Domains → FOREIGN-Telegram-IP → Direct; Apply. Списки в `/root` уже без
   комментариев: валидатор Hiddify не принимает строки `#`. Клиент: IPv6 off, DNS

@@ -101,6 +101,8 @@ Reality SNI candidate: ${REALITY_SNI}
 
 9) Tests
    - youtube.com, google.com, claude.ai -> through FOREIGN
+   - rutracker.org, rutor.info, instagram.com -> through FOREIGN (media loads;
+     torrent announces reach the tracker)
    - gemini.google.com opens without "not available in your country"
      (signed out; an account with RU country stays blocked by account country)
      Signed-in "not supported in your country" while incognito works is not a

@@ -105,6 +105,11 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   `config/rules/foreign-domains.txt`; `geosite:google` does not cover them.
   `verify.sh` checks that coverage. Signed-in Gemini is gated by Google's
   exit-IP country and the account country, not by routing.
+- Services blocked in Russia are listed explicitly in
+  `config/rules/foreign-domains.txt` because no geosite tag is assumed for them:
+  `rutracker.org`/`rutracker.net` plus announce host `t-ru.org`, `rutor.info` with
+  mirrors and `dler.cc` (serves `.torrent`), and `instagram.com` with its CDN
+  (`cdninstagram.com`, `fbcdn.net`). `verify.sh` checks the three main hosts.
 - Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
   rewriting (`routeOnly=false`, sniffing `http/tls/quic`) only work there.
 - Handoff exchange is circular and public-only: the first run of each role emits

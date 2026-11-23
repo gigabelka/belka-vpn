@@ -41,7 +41,7 @@ Hiddify Manager (v14.5) собирает Xray-конфиг с `domainStrategy: I
 
 Поэтому:
 
-- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`.
+- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`. Сюда же входят заблокированные в РФ торрент-трекеры (`rutracker.org`, `rutor.info` с announce-хостами `t-ru.org` и вспомогательными `dler.cc`) и Instagram с CDN (`cdninstagram.com`, `fbcdn.net`): для них нет geosite-тегов, поэтому хосты перечислены явно.
 - **FOREIGN-Google-IP** — только `geoip:google`, ниже FOREIGN-Domains. Ловит соединения к адресам Google без домена (приложения, которые ходят по IP, хосты вне доменных списков), чтобы залогиненная сессия Google не видела российский IP рядом с зарубежным.
 - **FOREIGN-Telegram-IP** — только `geoip:telegram`, ниже FOREIGN-Domains. Telegram-клиенты ходят на hardcoded IP без SNI.
 - **Direct** — последний и default.

@@ -76,3 +76,21 @@ t.me
 telegra.ph
 telesco.pe
 web.telegram.org
+
+# Torrent trackers blocked in Russia: site, announce hosts and mirrors.
+# t-ru.org covers the announce hosts bt.t-ru.org, bt2.t-ru.org, bt3.t-ru.org,
+# bt4.t-ru.org; dler.cc is where rutor.info serves the .torrent files.
+rutracker.org
+rutracker.net
+t-ru.org
+
+rutor.info
+rutor.is
+rutor.co
+dler.cc
+
+# Instagram (Meta). Photos/video come from the Instagram CDN and the Facebook
+# CDN (fbcdn.net also serves Facebook/WhatsApp — that is acceptable).
+instagram.com
+cdninstagram.com
+fbcdn.net
