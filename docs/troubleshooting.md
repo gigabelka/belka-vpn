@@ -86,6 +86,50 @@ curl -s -o /dev/null -w '%{http_code}\n' --socks5-hostname 172.16.0.1:1080 \
   https://www.youtube.com/generate_204                            # 204
 ```
 
+## Сайт не открывается в браузере, но работает через curl/SOCKS
+
+Признак: домен есть в `/root/belka-foreign-domains.txt`, `curl` через SOCKS на RU
+и `curl.exe` с самого клиента отдают `200`, а браузер — таймаут или ошибку
+соединения. При этом YouTube/Google в том же браузере открываются.
+
+Причина: браузер с включённым «безопасным DNS» (DoH) получает HTTPS-запись домена
+с параметром `ech` (так отдаёт Cloudflare, например для `rutracker.org`) и шифрует
+SNI. Xray не видит домен, правило по домену не срабатывает, и трафик уходит в
+`Direct` с российского IP — заблокированный сайт не открывается. YouTube при этом
+работает, потому что его ловит `geoip:google` по IP в `FOREIGN-Google-IP`, поэтому
+сбой выглядит выборочным.
+
+Проверка на клиенте (curl не использует ECH):
+
+```bash
+curl -sS -o /dev/null -w '%{http_code}\n' https://rutracker.org/forum/index.php
+```
+
+`200` у curl при ошибке в браузере — почти всегда ECH/DoH. Публикует ли домен ECH:
+
+```bash
+curl -sS -H 'accept: application/dns-json' \
+  'https://cloudflare-dns.com/dns-query?name=rutracker.org&type=HTTPS'
+```
+
+`ech=AEX+…` в ответе подтверждает причину.
+
+Исправление — выключить DoH и ECH в браузере:
+
+- Chrome / Edge / Яндекс: Настройки → Конфиденциальность и безопасность →
+  «Использовать безопасный DNS» → выкл; в адресной строке
+  `chrome://flags/#encrypted-client-hello` (в Яндексе `browser://flags/…`) →
+  `Disabled`; перезапустить браузер.
+- Firefox: `about:preferences#privacy` → «DNS через HTTPS» → выкл;
+  `about:config` → `network.dns.echconfig.enabled = false` (и
+  `network.dns.http3_echconfig.enabled = false`); перезапустить.
+
+После исправления очистите site data или откройте приватное окно — страница
+блокировки кешируется и переживает отключение ECH.
+
+На сервере это не исправляется: SNI зашифрован, доменное правило его не увидит, а
+IP-правило бесполезно — адреса Cloudflare общие для многих сайтов.
+
 ## Anthropic/Claude отдаёт 403
 
 403 с текстом про регион означает, что выход всё ещё российский.
