@@ -1,0 +1,13 @@
+# Outbound FOREIGN-Google-IP -> "Geosites / GeoIPs (xray)" in Hiddify Manager.
+# Catches connections to Google address ranges that carry no sniffable domain
+# (apps connecting by IP, hosts missing from the domain/geosite lists), so a
+# signed-in Google session never sees a Russian exit IP next to the FOREIGN one.
+#
+# Keep this outbound in its OWN entry, BELOW FOREIGN-Domains and never mixed
+# with domains: Google domains must match FOREIGN-Domains first, otherwise
+# domainStrategy IPOnDemand would resolve them through Russian DNS. With
+# sniffing routeOnly=false the domain is still what FOREIGN receives.
+# The ranges come from the geoip.dat shipped with Hiddify/Xray; nothing is
+# downloaded at runtime.
+
+geoip:google

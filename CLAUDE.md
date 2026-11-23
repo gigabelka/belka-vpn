@@ -91,10 +91,14 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   SOCKS5 on `172.16.0.1:1080`, reachable only over the tunnel. **SOCKS, not NAT, is
   intentional**: domains resolve on the foreign side, so YouTube/Google avoid Russian GGC
   addresses and Anthropic sees a foreign IP; no `ip_forward`/NAT is needed.
-- RU has two foreign outbounds plus a default, in this order: `FOREIGN-Domains`
-  (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Telegram-IP`
-  (`geoip:telegram`), then `Direct`. The split avoids `domainStrategy: IPOnDemand`
-  resolving a Google domain through Russian DNS first.
+- RU has three foreign outbounds plus a default, in this order: `FOREIGN-Domains`
+  (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Google-IP` (only
+  `geoip:google`), `FOREIGN-Telegram-IP` (`geoip:telegram`), then `Direct`. The split
+  avoids `domainStrategy: IPOnDemand` resolving a Google domain through Russian DNS
+  first: domains match before any IP rule, and with `routeOnly=false` FOREIGN still
+  receives the domain. `FOREIGN-Google-IP` catches Google connections with no
+  sniffable domain so a signed-in session never mixes a RU exit IP in. `verify.sh`
+  fails if `geoip:google` shares a rule with domains or sits above the domain rule.
 - `google.com`/`googleapis.com` cover subdomains, but Google AI hosts in the
   `.google`, `.goog` and `.studio` zones (`gemini.google`, `ai.studio`,
   `generativeai.google`, `antigravity.google`, …) are listed explicitly in

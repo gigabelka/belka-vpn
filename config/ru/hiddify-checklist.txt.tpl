@@ -50,9 +50,18 @@ Reality SNI candidate: ${REALITY_SNI}
       country" even when incognito works.
       Domestic sites of Iran/Russia: OFF
       Rule-sets (hiddify-core): empty (Common Proxy Core = Xray)
-      *** Do NOT add geoip:google here. ***
+      *** Do NOT add geoip:google here (it has its own outbound B). ***
 
-   B) Name: FOREIGN-Telegram-IP
+   B) Name: FOREIGN-Google-IP
+      Host: ${FOREIGN_TUNNEL_IP}
+      Port: ${SOCKS_PORT}
+      Geosites/GeoIPs (xray): only geoip:google (see /root/belka-foreign-google-ip.txt)
+      Sites: empty
+      Catches Google connections without a sniffable domain, so a signed-in
+      session never mixes a RU exit IP with the FOREIGN one. Must stay BELOW
+      FOREIGN-Domains: Google domains have to match by domain first.
+
+   C) Name: FOREIGN-Telegram-IP
       Host: ${FOREIGN_TUNNEL_IP}
       Port: ${SOCKS_PORT}
       Geosites/GeoIPs (xray): only geoip:telegram (see /root/belka-foreign-telegram-ip.txt)
@@ -60,8 +69,9 @@ Reality SNI candidate: ${REALITY_SNI}
 
    Order (top to bottom):
       1. FOREIGN-Domains
-      2. FOREIGN-Telegram-IP
-      3. Direct  (last, enabled, default)
+      2. FOREIGN-Google-IP
+      3. FOREIGN-Telegram-IP
+      4. Direct  (last, enabled, default)
    Disable WARP (its openai rules can intercept AI traffic).
    Block: leave without lists.
 
@@ -69,7 +79,8 @@ Reality SNI candidate: ${REALITY_SNI}
 
 6) Verify the generated Xray config
    - sniffing enabled (http/tls/quic), routeOnly = false
-   - two SOCKS outbounds on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}
+   - three SOCKS outbounds on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}
+   - geoip:google only in its own rule, below the domain rule
    - Direct is last/default
    - no unknown geosite tags (xray -test must pass)
    If an unknown tag breaks Xray, remove it from the list and keep the

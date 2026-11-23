@@ -193,6 +193,7 @@ write_checklist() {
     /root/belka-ru-manual-checklist.txt 600
   write_rule_list "$SCRIPT_DIR/../config/rules/foreign-domains.txt" /root/belka-foreign-domains.txt
   write_rule_list "$SCRIPT_DIR/../config/rules/foreign-geosites.txt" /root/belka-foreign-geosites.txt
+  write_rule_list "$SCRIPT_DIR/../config/rules/foreign-google-ip.txt" /root/belka-foreign-google-ip.txt
   write_rule_list "$SCRIPT_DIR/../config/rules/foreign-telegram-ip.txt" /root/belka-foreign-telegram-ip.txt
   log INFO "manual checklist: /root/belka-ru-manual-checklist.txt"
   cat /root/belka-ru-manual-checklist.txt >&3
