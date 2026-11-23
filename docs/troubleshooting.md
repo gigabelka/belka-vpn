@@ -328,10 +328,16 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 `HARDEN_SSH=1` включает запрет пароля. Если ключ не был добавлен:
 
 1. Откройте консоль провайдера.
-2. Удалите `/etc/ssh/sshd_config.d/99-belka-hardening.conf`.
+2. Удалите `/etc/ssh/sshd_config.d/01-belka-hardening.conf` (в старых версиях —
+   `99-belka-hardening.conf`).
 3. `systemctl reload ssh`.
 
 Поэтому hardening по умолчанию выключен.
+
+Файл называется `01-…`, а не `99-…`: sshd берёт **первое** значение каждого параметра,
+а `sshd_config.d/*.conf` читает по алфавиту. Файл `99-…` не перебивал
+`PasswordAuthentication yes` из `50-cloud-init.conf`. Проверка: `sshd -T | grep -i
+passwordauthentication` должно показать `no`.
 
 ## Клиент импортирует подписку с ошибкой сертификата
 

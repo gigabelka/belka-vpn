@@ -147,6 +147,14 @@ net.core.default_qdisc = fq
 net.ipv4.tcp_congestion_control = bbr
 net.ipv4.conf.all.rp_filter = 2
 net.ipv4.conf.default.rp_filter = 2
+# Socket buffer ceilings match what Hiddify sets at runtime on RU; the kernel
+# defaults (208 KiB) cap explicit SO_RCVBUF/SO_SNDBUF requests on FOREIGN.
+net.core.rmem_max = 67108864
+net.core.wmem_max = 67108864
+net.ipv4.tcp_rmem = 4096 131072 67108864
+net.ipv4.tcp_wmem = 4096 65536 67108864
+# Recover from PMTU black holes inside the 1280-byte AmneziaWG tunnel.
+net.ipv4.tcp_mtu_probing = 1
 EOF
   sysctl --system >>"$LOG" 2>&1 || warn "sysctl --system reported errors"
 }
@@ -391,15 +399,30 @@ harden_ssh() {
   if [[ ${HARDEN_SSH:-0} != 1 ]]; then
     return 0
   fi
+  # sshd keeps the FIRST value it reads for each keyword and includes
+  # sshd_config.d/*.conf in lexical order, so the file must sort before
+  # cloud-init's 50-cloud-init.conf (which sets PasswordAuthentication yes).
+  local conf=/etc/ssh/sshd_config.d/01-belka-hardening.conf
+  if [[ ! -s /root/.ssh/authorized_keys ]]; then
+    warn "SSH hardening skipped: /root/.ssh/authorized_keys is empty"
+    return 0
+  fi
   warn "SSH hardening requested; make sure key-based login works in a second session"
-  write_if_changed /etc/ssh/sshd_config.d/99-belka-hardening.conf 644 <<'EOF'
+  rm -f /etc/ssh/sshd_config.d/99-belka-hardening.conf
+  write_if_changed "$conf" 644 <<'EOF'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
 EOF
   if ! sshd -t >>"$LOG" 2>&1; then
-    rm -f /etc/ssh/sshd_config.d/99-belka-hardening.conf
+    rm -f "$conf"
     die "sshd config test failed; hardening file removed"
+  fi
+  # Capture first: grep -q closing the pipe early would fail under pipefail.
+  local effective
+  effective=$(sshd -T 2>/dev/null || true)
+  if ! grep -qx 'passwordauthentication no' <<<"$effective"; then
+    warn "SSH hardening file written but sshd still allows passwords; check sshd_config"
   fi
   systemctl reload ssh >>"$LOG" 2>&1 || warn "could not reload ssh"
   log INFO "SSH hardening enabled"
