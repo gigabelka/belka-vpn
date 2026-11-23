@@ -180,6 +180,23 @@ check_hiddify_routing() {
     warn "Hiddify does not route Google AI hosts (ai.studio, gemini.google, generativeai.google); signed-in Gemini may leave via Direct"
   fi
 
+  # Rutracker/Rutor/Instagram are listed explicitly (no geosite tag is assumed),
+  # so a missing entry means that service leaves via Direct with a RU IP.
+  blocked_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "instagram.com" or . == "domain:instagram.com"
+              or . == "rutracker.org" or . == "domain:rutracker.org"
+              or . == "rutor.info" or . == "domain:rutor.info")] | length' "$cfg")
+  if (( blocked_count >= 3 )); then
+    ok "Hiddify routes rutracker.org/rutor.info/instagram.com to a SOCKS outbound"
+  elif (( blocked_count > 0 )); then
+    warn "Hiddify routes only part of rutracker/rutor/instagram; paste the full /root/belka-foreign-domains.txt"
+  else
+    bad "Hiddify routes no rutracker/rutor/instagram domains to a SOCKS outbound"
+  fi
+
   telegram_count=$(jq --argjson tags "$tags_json" '
     [.routing.rules[]?
      | select(.outboundTag as $t | ($tags | index($t // "")) != null)
