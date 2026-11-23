@@ -86,6 +86,54 @@ curl -s -o /dev/null -w '%{http_code}\n' --socks5-hostname 172.16.0.1:1080 \
   https://www.youtube.com/generate_204                            # 204
 ```
 
+## Через FOREIGN медленно: где узкое место
+
+Начните с измерения по участкам. Тогда видно, где теряется скорость: у клиента, в
+туннеле или на выходе FOREIGN.
+
+```bash
+# RU: скорость через SOCKS (весь путь туннель + выход FOREIGN)
+curl -s -o /dev/null -w '%{speed_download}\n' --socks5-hostname 172.16.0.1:1080 <URL большого файла>
+# FOREIGN: тот же файл напрямую (выход FOREIGN без туннеля)
+curl -s -o /dev/null -w '%{speed_download}\n' <URL большого файла>
+# RU: задержка и потери в туннеле и по голому каналу одновременно
+ping -q -c 500 -i 0.1 172.16.0.1 & ping -q -c 500 -i 0.1 <FOREIGN_PUBLIC_IP>; wait
+```
+
+Для пропускной способности туннеля нужен `iperf3`. Ставьте его временно и без демона.
+Сервер запускайте на RU (`iperf3 -s -1 -B 172.16.0.2`), клиент — на FOREIGN
+(`iperf3 -c 172.16.0.2`, обратное направление — `-R`). Сравните TCP через туннель и TCP
+по публичным IP.
+
+Как читать результат:
+
+- **Туннель медленнее голого TCP, ретрансмитов почти нет, CPU свободен** — UDP между
+  площадками ограничен по пути (шейпинг у провайдеров или хостеров). Сырой UDP в обход
+  туннеля упирается в тот же потолок. Настройками AmneziaWG и sysctl это не лечится;
+  поможет только другая площадка или порт.
+- **Пики задержки и потери одинаковы в туннеле и на голом канале** — проблема в сети
+  между площадками, а не в AmneziaWG.
+- **Скорость упирается в CPU** — на FOREIGN с одним vCPU смотрите `softirq` по дельте
+  `/proc/stat`.
+
+Ловушки измерений:
+
+- Потери UDP в `iperf3` часто означают дропы в приёмном буфере сокета, а не в сети.
+  Сравните с ростом `nstat -az UdpRcvbufErrors` на приёмнике.
+- Первый кадр `top -bn1` показывает среднее с момента загрузки, а не текущую нагрузку.
+- `mtr` с `-w`/`-z` на Ubuntu 24.04 может падать с `buffer overflow detected`.
+  Используйте `mtr -rn` или `ping`.
+- С ПК в TUN-режиме ICMP и `tracert` идут через sing-tun: промежуточных хопов не видно,
+  а TCP-«порты» выглядят открытыми, потому что TUN сам принимает соединение. Внешние
+  проверки делайте с другого сервера.
+
+## Сайт на хостинге (Hetzner и др.) не открывается напрямую из РФ
+
+Из России часть адресов крупных хостингов блокируется (TLS обрывается по таймауту).
+Проверка на RU: `curl -m 15 https://<сайт>` висит, а через
+`--socks5-hostname 172.16.0.1:1080` открывается. Если такие сайты нужны, добавьте их в
+`FOREIGN-Domains`. Для Hetzner в базе Hiddify есть `geosite:hetzner`.
+
 ## Сайт не открывается в браузере, но работает через curl/SOCKS
 
 Признак: домен есть в `/root/belka-foreign-domains.txt`, `curl` через SOCKS на RU
@@ -323,6 +371,66 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 - **Порты 80/443 заняты**: Hiddify нужны оба; освободите или не устанавливайте
   Hiddify (`INSTALL_HIDDIFY=0`).
 
+## После отключения протоколов Hiddify у клиентов пропадает связь
+
+Симптом: после выключения протоколов в панели часть запросов у клиентов падает по
+таймауту, а в `journalctl -u hiddify-xray` видны строки
+`rejected proxy/trojan: not trojan protocol` с IP клиентов.
+
+Причина: в подписке на устройстве остались удалённые конфиги. Группа `Auto` в Hiddify
+app какое-то время выбирает их, сервер не узнаёт такие подключения и отдаёт заглушке.
+Через несколько минут `Auto` сам переключается на рабочий конфиг, но приложение
+продолжает проверять старые, пока подписка не обновлена. У того, кто вручную закрепил
+удалённый конфиг, связи не будет до обновления подписки.
+
+Что делать: на каждом устройстве обновите подписку (профиль → «Обновить»).
+
+Какие флаги за что отвечают (Settings в панели; из CLI —
+`hiddify-panel-cli set-setting -k <ключ> -v False`, затем `hiddify apply --no-gui`):
+
+- `http_proxy_enable` («Allow HTTP Connection») — это **не** HTTP-прокси. Флаг
+  включает все конфиги без TLS: VLESS/VMess на порту 80 и raw VLESS/VMess на
+  случайных портах. Выключите, если клиенты ходят только через TLS/Reality на 443.
+  Сам порт 80 останется: haproxy нужен для выпуска сертификатов.
+- Отдельные порты открывают `ssh_server_enable`, `wireguard_enable`, `tuic_enable`,
+  `hysteria_enable` (Hysteria и Hysteria2), `mieru_enable`, `snell_enable`,
+  `anytls_enable`, а также `naive_enable`, `socks_enable`, `telegram_webproxy_enable`.
+- Основа belka-vpn — `vless_enable`, `reality_enable` и транспорты на 443 (`tcp`,
+  `grpc`, `xhttp`, `httpupgrade`, `h2`, `quic`).
+
+`hiddify apply` может завершиться с кодом 1 из-за шага WARP: если WARP не используется,
+это не ошибка. `hiddify-panel-cli get-setting` для выключенного флага ничего не
+выводит: проверяйте значение в таблице `bool_config` или в панели. Порты выключенных
+протоколов могут остаться в iptables — см. следующий раздел.
+
+## На RU в iptables остались порты выключенных протоколов
+
+Скрипт файрвола Hiddify (`/opt/hiddify-manager/generated/firewall.sh`) только
+добавляет правила и в конце сохраняет **всё** текущее состояние в
+`/etc/iptables/rules.v4` и `rules.v6`. При загрузке `netfilter-persistent`
+восстанавливает правила из этих файлов, и Hiddify сохраняет их снова. Поэтому
+ACCEPT-правила для портов выключенных протоколов живут вечно. Политика INPUT на RU и
+так ACCEPT, а на этих портах никто не слушает, так что вреда от них нет — это хвост.
+
+Чистить можно, если генератор Hiddify этот порт уже не создаёт (его нет в
+`generated/firewall.sh`) и на порту никто не слушает (`ss -lntu`). Это не ручное правило,
+а уборка того, что Hiddify больше не хочет:
+
+```bash
+P=<порт>   # порт выключенного протокола
+for t in iptables ip6tables; do
+  $t -S INPUT | grep -E -- "--dport $P( |$)" | sed 's/^-A /-D /' |
+    while read -r rule; do eval "$t $rule"; done
+done
+source /opt/hiddify-manager/scripts/common/utils.sh
+source /opt/hiddify-manager/services/firewall/utils.sh
+save_firewall
+bash /opt/hiddify-manager/services/firewall/run.sh   # не должен вернуть правило
+grep -c -- "--dport $P" /etc/iptables/rules.v4        # 0
+```
+
+Перед этим сохраните копии `rules.v4` и `rules.v6`.
+
 ## Не работают WireGuard или WARP в Hiddify на RU
 
 `install-ru.sh` выключает пересылку пакетов (`ip_forward`) на RU файлом
@@ -343,7 +451,15 @@ WireGuard и WARP в Hiddify без пересылки не работают. Ч
 
 ## Сломался SSH после hardening
 
-`HARDEN_SSH=1` включает запрет пароля. Если ключ не был добавлен:
+`HARDEN_SSH=1` пишет `/etc/ssh/sshd_config.d/01-belka-hardening.conf`:
+
+- вход по паролю выключен (`PasswordAuthentication no`, `KbdInteractiveAuthentication no`);
+- root входит только по ключу (`PermitRootLogin prohibit-password`);
+- проброс X11 выключен (`X11Forwarding no`): на серверах нет графики, проброс только
+  расширяет поверхность атаки.
+
+Проброс TCP (`AllowTcpForwarding`) оставлен включённым: через него идёт SSH к FOREIGN
+через туннель (см. ниже). Если ключ не был добавлен:
 
 1. Откройте консоль провайдера.
 2. Удалите `/etc/ssh/sshd_config.d/01-belka-hardening.conf` (в старых версиях —
@@ -354,8 +470,30 @@ WireGuard и WARP в Hiddify без пересылки не работают. Ч
 
 Файл называется `01-…`, а не `99-…`: sshd берёт **первое** значение каждого параметра,
 а `sshd_config.d/*.conf` читает по алфавиту. Файл `99-…` не перебивал
-`PasswordAuthentication yes` из `50-cloud-init.conf`. Проверка: `sshd -T | grep -i
-passwordauthentication` должно показать `no`.
+`PasswordAuthentication yes` из `50-cloud-init.conf`. Проверка: `sshd -T | grep -iE
+'passwordauthentication|x11forwarding'` должно показать `no` для обоих.
+
+## SSH к FOREIGN: «Connection closed» или `kex_exchange_identification`
+
+Если ПК подключён к VPN, SSH до FOREIGN идёт через Hiddify и выходит в интернет с IP
+RU. С этого же IP идут все клиенты VPN. На FOREIGN правило UFW `limit 22/tcp` отклоняет
+(REJECT) новые подключения с IP, который за последние 30 секунд сделал 6 и более попыток. Серия быстрых
+`ssh`-вызовов поэтому упирается в лимит примерно на минуту. Это не бан fail2ban:
+`fail2ban-client status sshd` адреса RU не покажет.
+
+Что делать:
+
+- объединяйте команды в одну SSH-сессию и подождите минуту;
+- или заходите на FOREIGN через RU по туннелю: у адреса `172.16.0.2` свой счётчик лимита,
+  и SSH FOREIGN доступен по `172.16.0.1`:
+
+  ```bash
+  ssh -J root@<RU_PUBLIC_IP> root@172.16.0.1
+  ```
+
+  При первом входе ssh спросит отпечаток ключа сервера для адреса `172.16.0.1`: сверьте
+  его с отпечатком FOREIGN (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` на
+  FOREIGN). Такой вход работает, пока жив туннель, и требует `AllowTcpForwarding` на RU.
 
 ## Клиент импортирует подписку с ошибкой сертификата
 
@@ -437,6 +575,13 @@ Hiddify блокирует QUIC/443; звонки Telegram используют 
 SOCKS на зарубежном сервере включает UDP, но хвост может резаться DPI/хостером.
 Проверьте `geoip:telegram` в отдельном outbound; при проблемах оставьте
 TCP-режим.
+
+## После загрузки `networking.service` и `ifup@eth0` в статусе failed
+
+У части хостеров в образе остаётся `/etc/network/interfaces` (ifupdown) рядом с
+netplan. Интерфейс уже настроил systemd-networkd, поэтому ifupdown падает. Проверка:
+`networkctl list` показывает `eth0` как `routable configured`. Ошибка безвредна; если
+мешает, удаляйте ifupdown-конфиг только с доступом к консоли провайдера.
 
 ## Повторный запуск скриптов что-то сломал
 

@@ -31,7 +31,9 @@ English. Roles are always named exactly `ru` and `foreign`.
   RU-owned `RU_PUBLIC_IP` and `REALITY_SNI` afterwards.
 - RU firewall is owned by Hiddify Manager; only the FOREIGN server uses UFW.
   `configure.sh` always writes `ENABLE_UFW=0` to `ru.env`, though `install-ru.sh` never
-  reads the flag. Do not add manual `ufw`/`iptables` rules on RU. fail2ban on RU uses
+  reads the flag. Do not add manual `ufw`/`iptables` rules on RU; removing a stale rule
+  Hiddify's generator no longer emits is allowed (procedure in `docs/troubleshooting.md`:
+  its script only appends and re-saves `/etc/iptables/rules.v4`). fail2ban on RU uses
   `banaction = route` (bans are `ip route add unreachable <ip>`), so it never touches the
   firewall; FOREIGN keeps the default iptables ban action.
 
@@ -178,6 +180,27 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
 - Hiddify Manager removal is intentionally manual and destructive; `install-ru.sh
   --uninstall` leaves it installed.
+- Hiddify reruns its installer on every RU boot and auto-updates nightly; the installer
+  recreates `/etc/sysctl.d/hiddify.conf` with `ip_forward = 1`. `install-ru.sh`
+  (`configure_ip_forwarding`) overrides it with `zz-belka-no-forward.conf`, which must sort
+  after `hiddify.conf` and `wg.conf` (last value wins). The kernel sets
+  `accept_redirects` to the inverse of forwarding, so the same file zeroes redirects via
+  `conf.*` globs (all/default alone miss existing interfaces). `RU_IP_FORWARD=1` removes
+  the override for Hiddify's WireGuard/WARP.
+- `harden_ssh` writes `sshd_config.d/01-belka-hardening.conf`: sshd keeps the first value
+  per keyword, so the file must sort before `50-cloud-init.conf`.
+- In Hiddify, `http_proxy_enable` ("Allow HTTP Connection") gates every non-TLS config
+  (port 80 and raw VLESS/VMess on random ports), not an HTTP proxy. Configs tagged `HC` are
+  served by hiddify-core (sing-box), whose routing gets only the domain list: no
+  `geosite`/`geoip`, which is why `config/rules/foreign-domains.txt` lists Google/YouTube
+  domains explicitly. After disabling a protocol, clients on the old subscription show
+  `not trojan protocol` rejects until they update it.
+- SSH to FOREIGN from a PC on the VPN egresses via the RU IP and trips `ufw limit 22/tcp`
+  ("Connection closed"), not fail2ban. Batch commands per session, or jump through RU
+  over the tunnel: `ssh -J root@<RU_PUBLIC_IP> root@172.16.0.1`.
+- Deploying from a Windows checkout: `core.autocrlf=true` makes both a working-tree tar and
+  plain `git archive` CRLF. Build with `git -c core.autocrlf=false -c core.eol=lf archive`
+  and check for CR bytes with Python (Git Bash `grep $'\r'` misses them).
 - Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
   order), `docs/hiddify-client.md` (Hiddify app setup, Direct rule, AllowedIPs,
   strict route), `docs/troubleshooting.md` (diagnosis), and the Russian README quick

@@ -10,7 +10,14 @@ Reality SNI candidate: ${REALITY_SNI}
 
 1) Quick setup
    - Country: Russia
-   - Protocols: VLESS only (disable Hysteria2/TUIC/Shadowsocks/etc.)
+   - Protocols: VLESS only, TLS/Reality on 443 (disable Hysteria2/TUIC/
+     Shadowsocks/SSH/WireGuard/Mieru/Snell/AnyTLS/Naive/etc.; each opens its
+     own public port)
+   - Allow HTTP Connection: OFF. Despite the name it is not an HTTP proxy: it
+     enables every config without TLS (port 80 and raw VLESS/VMess on random
+     ports). Port 80 itself stays open for certificates.
+   - Disabling a protocol after clients connected: they must update the
+     subscription; until then Xray logs "not trojan protocol" rejects.
    - Domains: no domain -> use the server IP (self-signed)
    NOTE: hiddify-core runs with a compatibility environment. Until you finish
    this checklist and press Apply, its default non-VLESS inbounds may be

@@ -151,7 +151,10 @@ hiddify admin   # ссылка — секрет
 
 Далее — `/root/belka-ru-manual-checklist.txt`. Критичные пункты:
 
-1. Country = Russia; только VLESS; без домена — IP + self-signed.
+1. Country = Russia; только VLESS (TLS/Reality на 443); без домена — IP + self-signed.
+   Остальные протоколы и «Allow HTTP Connection» (`http_proxy_enable`, конфиги без TLS)
+   выключить. Если выключаете уже после подключения клиентов, им нужно обновить
+   подписку (`docs/troubleshooting.md`).
 2. **Common Proxy Core = Xray**.
 3. Only IPv4 = ON; DNS `1.1.1.1`; firewall Hiddify пока OFF (включать в
    панели после успешного `verify.sh`; ручных ufw/iptables не добавлять).
@@ -168,7 +171,7 @@ hiddify admin   # ссылка — секрет
 8. Apply now.
 9. Проверить сгенерированный конфиг:
    - sniffing `http/tls/quic`, `routeOnly=false`;
-   - два Socks-outbound;
+   - три Socks-outbound;
    - Direct последний;
    - `xray -test` проходит (нет неизвестных geosite-тегов).
 10. Users → Add user → ссылка/подписка.
@@ -234,7 +237,54 @@ IPv4. RU и панель Hiddify не меняются.
 
 Повторный запуск скриптов идемпотентен. Ключи и обфускация переиспользуются.
 
-Ротация:
+### Доставка кода на серверы с Windows
+
+`/opt/belka-vpn` на серверах — копия из tar, а не git-клон. Если в рабочей копии
+`core.autocrlf=true`, то и tar рабочей копии, и обычный `git archive` дают CRLF, и bash
+падает с `$'\r': command not found`. Собирайте архив из коммита с LF и передавайте его
+из Git Bash: PowerShell 5.1 портит двоичный поток в пайпе.
+
+```bash
+git -c core.autocrlf=false -c core.eol=lf archive --format=tar -o deploy.tar \
+  HEAD scripts config docs tests .env.example README.md
+python -c "import tarfile,sys; t=tarfile.open(sys.argv[1]); \
+print([m.name for m in t if m.isfile() and b'\r' in t.extractfile(m).read()] or 'no CR')" deploy.tar
+ssh root@<server> 'tar -x -C /opt/belka-vpn && bash /opt/belka-vpn/tests/lint.sh' < deploy.tar
+```
+
+CR проверяйте Python-ом, а не `grep $'\r'`: grep из Git Bash CR не находит.
+
+### Обновление ОС и ядра
+
+Модуль AmneziaWG собирается через DKMS. Перед перезагрузкой в новое ядро убедитесь,
+что он собран, иначе `awg0` не поднимется. Сначала FOREIGN, потом RU: перезагрузка RU
+прерывает VPN у всех клиентов примерно на минуту, перезагрузка FOREIGN — только
+FOREIGN-маршруты, примерно на 20–30 секунд.
+
+```bash
+DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y \
+  -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade
+dkms status                                   # amneziawg: installed для нового ядра
+modinfo -k <новое ядро> amneziawg | grep vermagic
+grep -m1 -o 'Linux [0-9.-]*-generic' /boot/grub/grub.cfg   # первое = новое ядро
+systemctl reboot
+# после загрузки
+uname -r; bash scripts/verify.sh            # на FOREIGN: --role foreign
+```
+
+`--force-confold` сохраняет ваши конфиги (sshd, sysctl). Запускайте `apt-get` через
+`nohup` или в `tmux`: на RU ваша SSH-сессия может идти через тот же VPN.
+
+### Hiddify перезаписывает настройки сам
+
+На RU Hiddify запускает свой установщик при каждой загрузке
+(`/etc/cron.d/hiddify_reinstall_on_reboot`) и автообновление каждую ночь в 03:00
+(`hiddify_auto_update`). Установщик заново создаёт `/etc/sysctl.d/hiddify.conf` с
+включённой пересылкой — поэтому `install-ru.sh` перекрывает его файлом
+`zz-belka-no-forward.conf`. Новая версия Hiddify может вернуть протоколы или правила по
+умолчанию. После перезагрузки RU и после обновлений Hiddify прогоняйте `verify.sh`.
+
+### Ротация ключей
 
 ```bash
 # 1. зарубежный сервер
@@ -266,7 +316,8 @@ ls /opt/hiddify-manager/uninstall.sh
 Если потерян SSH на RU, используйте консоль провайдера. Firewall на RU
 принадлежит Hiddify Manager — правьте его через панель (Settings → Advanced →
 Firewall, затем Apply now), а не ручными `iptables`/`ufw`: панель перезапишет
-ручные правила. Если доступа к панели нет:
+ручные правила. Исключение — хвосты от выключенных протоколов, которые Hiddify сам
+не удаляет (`docs/troubleshooting.md`). Если доступа к панели нет:
 
 ```bash
 systemctl restart ssh
