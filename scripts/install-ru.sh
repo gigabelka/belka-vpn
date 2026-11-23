@@ -97,6 +97,15 @@ configure_ip_forwarding() {
 # rerun install-ru.sh, or delete this file and run `sysctl --system`.
 net.ipv4.ip_forward = 0
 net.ipv6.conf.all.forwarding = 0
+# Turning forwarding off makes the kernel re-enable ICMP redirects (it sets
+# accept_redirects to the inverse of forwarding), and RU has no UFW to turn
+# them off again. These lines must stay after the forwarding ones. Globs, not
+# just all/default: with forwarding off IPv4 accepts a redirect when either
+# all or the interface allows it, and IPv6 ignores all for existing
+# interfaces. default covers interfaces created later (awg0 at boot).
+net.ipv4.conf.*.accept_redirects = 0
+net.ipv4.conf.*.secure_redirects = 0
+net.ipv6.conf.*.accept_redirects = 0
 EOF
   if (( TEMPLATE_CHANGED )) || [[ $(sysctl -n net.ipv4.ip_forward) != 0 ]]; then
     sysctl --system >>"$LOG" 2>&1 || warn "sysctl --system reported errors"
@@ -105,6 +114,13 @@ EOF
     warn "IP forwarding is still on; another sysctl file sorts after $conf"
   else
     log INFO "IP forwarding disabled"
+  fi
+  local f redirects_on=()
+  for f in /proc/sys/net/ipv4/conf/*/accept_redirects /proc/sys/net/ipv6/conf/*/accept_redirects; do
+    [[ -r $f && $(<"$f") != 0 ]] && redirects_on+=("${f#/proc/sys/net/}")
+  done
+  if (( ${#redirects_on[@]} )); then
+    warn "ICMP redirects still accepted: ${redirects_on[*]}"
   fi
 }
 
