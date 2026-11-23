@@ -70,9 +70,10 @@ curl -v --socks5-hostname 172.16.0.1:1080 https://api.ipify.org
 
 1. **Common Proxy Core = Xray** (Settings → Advanced). Без этого `geosite`/
    `geoip` не работают, а SNI не переподставляется.
-2. В outbound `FOREIGN-Domains` **нет** `geoip:google`.
-3. Два outbound: `FOREIGN-Domains` (домены) выше `FOREIGN-Telegram-IP`
-   (`geoip:telegram`), `Direct` — последний.
+2. В outbound `FOREIGN-Domains` **нет** `geoip:google` (он только в отдельном
+   `FOREIGN-Google-IP`).
+3. Порядок: `FOREIGN-Domains` (домены) → `FOREIGN-Google-IP` (`geoip:google`) →
+   `FOREIGN-Telegram-IP` (`geoip:telegram`) → `Direct` последний.
 4. Sniffing включён, `routeOnly=false` в сгенерированном конфиге.
 5. Клиент: Resolve Destination OFF, DNS remote, IPv6 off.
 6. Hiddify блокирует QUIC/443 — это нормально, YouTube пойдёт по TCP.
@@ -123,6 +124,8 @@ VPN обязательно перезагрузите вкладку: соеди
    `flow.google`, `opal.google`, `antigravity.google`, `antigravity-unleash.goog`.
    Убедитесь, что в Sites вставлен весь `/root/belka-foreign-domains.txt`;
    `verify.sh` проверяет покрытие этих хостов по сгенерированному конфигу.
+   Соединения к IP Google без домена (приложения, хосты вне списков) ловит
+   `FOREIGN-Google-IP` с `geoip:google` — без него они уходят Direct.
 2. **Страна exit-IP (`x-country: ru`)** — Google считает адрес российским, даже
    когда ipinfo/RIPE показывают другую страну. Смена правил не поможет: нужен
    другой IP/подсеть/хостер или IPv6-выход (`GOOGLE_IPV6_EGRESS=1`, см. runbook).
@@ -226,17 +229,21 @@ jq -r '.routing.rules | to_entries[]
   созданный через туннель в поддерживаемой стране (без российского телефона и
   платёжного профиля). `verify.sh` проверяет маршрутизацию Gemini/AI-хостов и
   страну exit-IP, но страну аккаунта он не видит.
-- **Не делайте:** не добавляйте `geoip:google`; не правьте
+- **Не делайте:** не добавляйте `geoip:google` в `FOREIGN-Domains` (только в
+  отдельный `FOREIGN-Google-IP` ниже него); не правьте
   `/opt/hiddify-manager/generated/xray.json` (перезапишется при Apply); не ставьте
   WARP выше Socks.
 
-Почему нельзя «прокинуть все IP»: поле Geosites/GeoIPs в Hiddify Manager (Xray)
+Как «прокинуть все IP» Google: поле Geosites/GeoIPs в Hiddify Manager (Xray)
 принимает только `geosite:`/`geoip:`, произвольные CIDR туда не вставляются;
-rule-sets работают только в hiddify-core, а Common Proxy Core обязан быть Xray;
-`geoip:google` запрещён (`domainStrategy: IPOnDemand` резолвит Google российским
-DNS). Эквивалент — полный доменный список: RU сниффит SNI и передаёт домен на
-FOREIGN, где он и резолвится. Соединения «голым IP» без SNI и трафик с ECH/DoH
-доменными правилами не ловятся — это ограничение клиента.
+rule-sets работают только в hiddify-core, а Common Proxy Core обязан быть Xray.
+Поэтому диапазоны Google задаёт `geoip:google` в **отдельном** outbound
+`FOREIGN-Google-IP` ниже `FOREIGN-Domains`. В одном правиле с доменами он
+запрещён: `domainStrategy: IPOnDemand` резолвил бы Google российским DNS. Домены
+по-прежнему ловятся первыми, RU передаёт на FOREIGN сниффнутый домен, и FOREIGN
+резолвит его сам; `FOREIGN-Google-IP` добирает соединения «голым IP». `verify.sh`
+падает, если `geoip:google` стоит в правиле с доменами или выше доменного правила.
+Трафик с ECH/DoH по-прежнему не сниффится — выключайте их в браузере.
 
 `ipinfo.io` в браузере не входит в список FOREIGN и покажет российский IP даже при
 рабочем туннеле. Чтобы проверить выход, временно добавьте `ipinfo.io` в Sites, нажмите

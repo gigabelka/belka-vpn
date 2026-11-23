@@ -206,12 +206,29 @@ check_hiddify_routing() {
     bad "Hiddify rule order is wrong: domain lists must be matched before geoip:telegram"
   fi
 
+  # geoip:google is allowed only in its own IP-only rule (FOREIGN-Google-IP)
+  # below the domain rule; mixed with domains, IPOnDemand would resolve Google
+  # domains through Russian DNS first.
   if jq -e '
-      [.routing.rules[]? | ((.domain // [])[]), ((.ip // [])[])
+      [.routing.rules[]?
+       | select(((.domain // []) | length) > 0)
+       | ((.domain // [])[]), ((.ip // [])[])
        | select(. == "geoip:google")] | length > 0' "$cfg" >/dev/null 2>&1; then
-    bad "Hiddify routing contains geoip:google (forbidden)"
+    bad "Hiddify has geoip:google in a rule with domains (must be its own FOREIGN-Google-IP outbound)"
+  fi
+
+  google_ip_idx=$(jq --argjson tags "$tags_json" '
+    [.routing.rules | to_entries[]?
+     | select(.value.outboundTag as $t | ($tags | index($t // "")) != null)
+     | select(((.value.domain // []) | length) == 0)
+     | select(((.value.ip // []) | index("geoip:google")) != null)
+     | .key] | min // -1' "$cfg")
+  if [[ $google_ip_idx == -1 ]]; then
+    warn "Hiddify has no geoip:google rule to a SOCKS outbound (FOREIGN-Google-IP); Google connections without a domain leave via Direct"
+  elif [[ $domain_idx != -1 ]] && (( domain_idx < google_ip_idx )); then
+    ok "Hiddify routes geoip:google to a SOCKS outbound, after the domain lists"
   else
-    ok "Hiddify routing does not use geoip:google"
+    bad "Hiddify rule order is wrong: domain lists must be matched before geoip:google"
   fi
 
   if jq -e '

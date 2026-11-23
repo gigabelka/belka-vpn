@@ -30,28 +30,30 @@ AmneziaWG:   UDP/443 (настраивается)
 
 1. Клиент устанавливает VLESS+Reality-соединение с российским сервером.
 2. Xray на RU получает SNI (sniffing), применяет правила Outbounds сверху вниз.
-3. Совпало с `FOREIGN-Domains` или `FOREIGN-Telegram-IP` → соединение уходит в SOCKS5-outbound на `172.16.0.1:1080`.
+3. Совпало с `FOREIGN-Domains`, `FOREIGN-Google-IP` или `FOREIGN-Telegram-IP` → соединение уходит в SOCKS5-outbound на `172.16.0.1:1080`.
 4. SOCKS-трафик идёт внутри `awg0` (AmneziaWG) до зарубежного сервера.
 5. Xray на FOREIGN принимает SOCKS, резолвит домен через зарубежные DNS (`1.1.1.1`, `8.8.8.8`) и открывает соединение в интернет.
 6. Не совпало ни с одним FOREIGN-правилом → `Direct`, выход из России.
 
-## Почему два outbound
+## Почему отдельные outbound
 
 Hiddify Manager (v14.5) собирает Xray-конфиг с `domainStrategy: IPOnDemand`. Если в outbound одновременно есть доменные правила и `geoip:google`, Xray может сначала резолвить Google-домен российским DNS, получить российский GGC-адрес и отправить на зарубежный сервер уже IP. Зарубежный выход подключится к российскому кэшу — это медленно и ненадёжно.
 
 Поэтому:
 
 - **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`.
+- **FOREIGN-Google-IP** — только `geoip:google`, ниже FOREIGN-Domains. Ловит соединения к адресам Google без домена (приложения, которые ходят по IP, хосты вне доменных списков), чтобы залогиненная сессия Google не видела российский IP рядом с зарубежным.
 - **FOREIGN-Telegram-IP** — только `geoip:telegram`, ниже FOREIGN-Domains. Telegram-клиенты ходят на hardcoded IP без SNI.
 - **Direct** — последний и default.
 
-`geoip:google` намеренно не используется. Google Play/сервисы, которые ходят по IP без SNI, могут остаться Direct — это осознанный компромисс.
+Почему `FOREIGN-Google-IP` не возвращает проблему GGC: Google-домены совпадают с `FOREIGN-Domains` раньше, чем Xray дойдёт до IP-правила, поэтому IPOnDemand их не резолвит. Для остальных соединений резолв на RU нужен только для выбора правила: при `routeOnly=false` на FOREIGN уходит сниффнутый домен, и FOREIGN резолвит его сам. Российские GGC-кэши живут в AS провайдеров и в `geoip:google` не входят. Побочный эффект: сайты на IP Google Cloud тоже выходят через FOREIGN. Диапазоны берутся из `geoip.dat`, который уже есть в Hiddify; во время работы ничего не скачивается.
 
 ### Границы доменной маршрутизации
 
 Поле Sites/Geosites в Hiddify Manager (Xray) принимает домены и `geosite:`/`geoip:`,
 но не CIDR; rule-sets доступны только в hiddify-core, а Common Proxy Core обязан
-быть Xray. Поэтому «прокинуть все IP» нельзя: `google.com` и `googleapis.com`
+быть Xray. Поэтому произвольные CIDR туда не вставить: IP-диапазоны Google
+покрывает `geoip:google` в отдельном `FOREIGN-Google-IP`, а `google.com` и `googleapis.com`
 покрывают поддомены, а зоны `.google`, `.goog`, `.studio` (`gemini.google`,
 `ai.studio`, `ai.google.dev`, `antigravity.google`, …) перечислены в
 `config/rules/foreign-domains.txt` явно — иначе они уходили бы Direct и Google

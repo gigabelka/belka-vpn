@@ -159,9 +159,12 @@ hiddify admin   # ссылка — секрет
 5. Outbound `FOREIGN-Domains`: Socks `172.16.0.1:1080`, списки
    `/root/belka-foreign-domains.txt` + `/root/belka-foreign-geosites.txt`,
    **без** `geoip:google`, Domestic sites OFF.
-6. Outbound `FOREIGN-Telegram-IP`: Socks `172.16.0.1:1080`, только
+6. Outbound `FOREIGN-Google-IP`: Socks `172.16.0.1:1080`, только
+   `/root/belka-foreign-google-ip.txt` (`geoip:google`), Sites пустые.
+   Outbound `FOREIGN-Telegram-IP`: Socks `172.16.0.1:1080`, только
    `/root/belka-foreign-telegram-ip.txt`.
-7. Порядок: FOREIGN-Domains → FOREIGN-Telegram-IP → Direct (default). WARP OFF.
+7. Порядок: FOREIGN-Domains → FOREIGN-Google-IP → FOREIGN-Telegram-IP → Direct
+   (default). WARP OFF.
 8. Apply now.
 9. Проверить сгенерированный конфиг:
    - sniffing `http/tls/quic`, `routeOnly=false`;

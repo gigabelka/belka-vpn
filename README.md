@@ -186,11 +186,12 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 2. **Settings → Advanced → Common Proxy Core = Xray** — без этого `geosite`/`geoip` не работают, а домен из SNI не переподставляется.
 3. **Only IPv4 = ON**, DNS = `1.1.1.1`, firewall Hiddify пока OFF (включать в панели после успешного `verify.sh`; ручных ufw/iptables не добавлять).
 4. Reality на `443/tcp`, SNI — чужой сайт с TLS 1.3 + HTTP/2 (подобрать сканером).
-5. Два outbound типа **Socks** на `172.16.0.1:1080`:
+5. Три outbound типа **Socks** на `172.16.0.1:1080`:
    - `FOREIGN-Domains` — только домены (`/root/belka-foreign-domains.txt`) и `geosite` (`/root/belka-foreign-geosites.txt`), **без** `geoip:google`;
+   - `FOREIGN-Google-IP` — только `geoip:google` (`/root/belka-foreign-google-ip.txt`);
    - `FOREIGN-Telegram-IP` — только `geoip:telegram` (`/root/belka-foreign-telegram-ip.txt`).
-6. Порядок: `FOREIGN-Domains` → `FOREIGN-Telegram-IP` → `Direct` (последний, default). WARP выключить.
-7. **Apply now**, затем проверить сгенерированный Xray-конфиг: sniffing включён, `routeOnly=false`, два Socks-outbound, Direct последний.
+6. Порядок: `FOREIGN-Domains` → `FOREIGN-Google-IP` → `FOREIGN-Telegram-IP` → `Direct` (последний, default). WARP выключить.
+7. **Apply now**, затем проверить сгенерированный Xray-конфиг: sniffing включён, `routeOnly=false`, три Socks-outbound, Direct последний.
 8. **Users → Add user** — получить `vless://` или подписку.
 
 ### 8. Клиент Hiddify app
