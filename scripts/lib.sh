@@ -413,6 +413,7 @@ harden_ssh() {
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
+X11Forwarding no
 EOF
   if ! sshd -t >>"$LOG" 2>&1; then
     rm -f "$conf"
