@@ -109,10 +109,11 @@ check_hiddify_routing() {
     | .tag // empty' "$cfg")
   tags_json=$(printf '%s\n' "$socks_tags" | jq -R . | jq -s 'map(select(length > 0))')
 
-  if (( socks_count >= 2 )); then
+  # FOREIGN-Domains, FOREIGN-Google-IP and FOREIGN-Telegram-IP.
+  if (( socks_count >= 3 )); then
     ok "Hiddify has ${socks_count} SOCKS outbound(s) to ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
   else
-    bad "Hiddify has ${socks_count} SOCKS outbound(s) to ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (expected 2)"
+    bad "Hiddify has ${socks_count} SOCKS outbound(s) to ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (expected 3)"
   fi
 
   while IFS= read -r tag; do

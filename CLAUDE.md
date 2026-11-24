@@ -157,7 +157,8 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   `/opt/hiddify-manager`, logs in `/var/log/belka-vpn-{ru,foreign,verify,bootstrap}.log`.
 - Modes: 600 for env files, handoffs, keys, logs, the checklist, and `awg0.conf` (it
   holds the private key); 644 for other system configs; 700 for `/etc/belka-vpn` and the
-  key directory. Scripts are committed executable (`100755`); `tests/lint.sh` checks it.
+  key directory. Scripts are committed executable (`100755`); `tests/lint.sh` checks only
+  `scripts/configure.sh`, so keep the others executable by hand.
 
 ## Operational gotchas
 
