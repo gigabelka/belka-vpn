@@ -190,7 +190,7 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 
 Ключевые шаги (полный чек-лист — `/root/belka-ru-manual-checklist.txt`):
 
-1. **Country = Russia**, протоколы — только **VLESS** (TLS/Reality на 443), домен не обязателен (IP + self-signed). Лишние протоколы (Hysteria2, TUIC, SSH, WireGuard и др.) и **Allow HTTP Connection** выключите: каждый открывает свой порт или конфиги без TLS. Подробнее — `docs/troubleshooting.md`.
+1. **Country = Russia**, протоколы — только **VLESS** (TLS/Reality на 443), домен не обязателен (IP + self-signed). Лишние протоколы (Hysteria2, TUIC, SSH, WireGuard и др.) и **Allow HTTP Connection** выключите: каждый открывает свой порт или конфиги без TLS. Дополнительно отключите `HC`-конфиги и транспорты `vmess/grpc/httpupgrade/xhttp/quic/h2`: у hiddify-core нет `geoip:telegram`, и Telegram по IP уйдёт Direct. Подробнее — `docs/troubleshooting.md`.
 2. **Settings → Advanced → Common Proxy Core = Xray** — без этого `geosite`/`geoip` не работают, а домен из SNI не переподставляется.
 3. **Only IPv4 = ON**, DNS = `1.1.1.1`, firewall Hiddify пока OFF (включать в панели после успешного `verify.sh`; ручных ufw/iptables не добавлять).
 4. Reality на `443/tcp`, SNI — чужой сайт с TLS 1.3 + HTTP/2 (подобрать сканером).
@@ -244,7 +244,7 @@ bash scripts/verify.sh --role foreign
 - rutracker.org, rutor.info и instagram.com открываются через зарубежный сервер (медиа Instagram грузится);
 - `gemini.google.com` не показывает «недоступно в вашей стране»;
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
-- в клиенте `ipinfo.io` → российский IP, а YouTube/Google/Claude идут через зарубежный сервер.
+- в клиенте `api.ipify.org` → российский IP (`ipinfo.io` может уйти через FOREIGN, если его адрес попадает в `geoip:google`), а YouTube/Google/Claude и Telegram (сообщения и медиа) идут через зарубежный сервер.
 
 ## Обновление
 
@@ -289,7 +289,7 @@ Hiddify Manager удаляется отдельно (официальный unin
 
 - UI Hiddify Manager (Reality, Outbounds, sniffing/DNS) скриптами не автоматизируется: панель перезаписывает сгенерированные конфиги. Скрипт печатает точный чек-лист.
 - Без домена подписка по HTTPS может отклоняться Hiddify app из-за self-signed — используйте прямую `vless://`-ссылку.
-- Hiddify Manager блокирует QUIC/443 на серверной стороне: YouTube/Google пойдут по TCP (SNI-маршрутизация сохраняется). UDP Telegram на других портах может работать; звонки проверяйте отдельно.
+- Hiddify Manager блокирует QUIC/443 на серверной стороне: YouTube/Google пойдут по TCP (SNI-маршрутизация сохраняется). HC-конфиги на RU отключены, поэтому Telegram по IP идёт через `geoip:telegram` → FOREIGN, включая медиа. UDP Telegram на других портах может работать; звонки проверяйте отдельно.
 - Hiddify Manager отправляет протокол BitTorrent в blackhole (правило в сгенерированном `xray.json`): сайты и анонсы трекеров (HTTP к `t-ru.org`) идут через FOREIGN, но P2P-обмен торрент-клиента через VPN не работает.
 - Claude Code не поддерживает SOCKS: на компьютере нужен TUN-режим Hiddify; WSL2/Docker могут обходить TUN.
 

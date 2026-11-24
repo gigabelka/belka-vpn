@@ -37,7 +37,9 @@ lsmod | grep amneziawg
   `/etc/amnezia/amneziawg/awg0.conf` на обоих концах.
 - **Порт закрыт**: на зарубежном сервере `ufw status`; у провайдера — security
   group/firewall. Проверка: `tcpdump -ni any udp port 443` на обоих.
-- **MTU**: начните с `1280`; при фрагментации снижайте до `1240`.
+- **MTU**: в текущем развёртывании `1240` (снижено с `1280`: крупные пакеты терялись,
+  RTT давал всплески). Payload 1200 Б проходит чисто, ровно-в-MTU 1212 Б может
+  всплескивать; при проблемах пробуйте 1228–1232.
 - **Jmax > MTU**: параметр не должен превышать MTU.
 - **Несовпадение `S3/S4`/`HeaderProtectionKey`**: если включили, они должны
   быть одинаковы; при сомнениях оставьте `AWG_ENABLE_S3S4=0`.
@@ -577,6 +579,49 @@ Hiddify блокирует QUIC/443; звонки Telegram используют 
 SOCKS на зарубежном сервере включает UDP, но хвост может резаться DPI/хостером.
 Проверьте `geoip:telegram` в отдельном outbound; при проблемах оставьте
 TCP-режим.
+
+## Telegram: нестабильность, медленные медиа
+
+Симптомы: сообщения периодически не доходят, медиа/картинки/видео грузятся очень долго.
+
+Причина: в подписке были `HC`-конфиги (`custom_proxy.server_core=hiddify_core`). Их
+обслуживает hiddify-core, в маршрутизации которого нет `geoip:telegram` — только
+список доменов. Telegram ходит на IP без SNI, поэтому такой конфиг уводит Telegram в
+Direct из РФ, а TCP из РФ в Telegram заблокирован (ICMP при этом проходит).
+Клиентский `Auto` (`balance`) размазывает соединения по всем конфигам, поэтому сбои
+выглядят как «иногда».
+
+На RU отключены все custom-proxy с `server_core=hiddify_core` (`enable=0`), а также
+транспорты `vmess`, `grpc`, `httpupgrade`, `xhttp`, `quic`, `h2`; оставлены `vless`,
+`reality`, `tcp`. Подписка теперь содержит только Xray-конфиги (`raw vless REALITY`
+и `rawhttp vless`), без `HC`.
+
+Проверка:
+
+```bash
+# флаги панели
+hiddify-panel-cli get-setting vless_enable      # True
+hiddify-panel-cli get-setting vmess_enable      # пусто/False
+
+# HC-пресеты: ожидается hiddify_core 0 включённых
+mysql ... "SELECT server_core, enable, COUNT(*) FROM custom_proxy GROUP BY server_core, enable"
+
+# правило Telegram в сгенерированном Xray-конфиге
+jq '.routing.rules[] | select(.ip != null)' /opt/hiddify-manager/generated/xray.json
+```
+
+Порядок изменения: `hiddify-panel-cli backup` → правка `custom_proxy`/флагов →
+`hiddify apply --no-gui` (ошибка шага WARP с `rc=1` безвредна).
+
+Клиентские настройки руками не меняем: Hiddify app сам обновляет профиль по интервалу
+(в текущем профиле 3600 с; панель `auto_update=1`). Перезапуск приложения запускает
+проверку, но не отменяет интервал; обновление можно форсировать кнопкой обновления
+профиля.
+
+`box.log` клиента может писать `MONITORING result ... failed: no route to internet`:
+это его прямой health-check до IP сервера при `strict_route`, а не реальный трафик.
+История Clash API ядра (`/proxies`) при этом показывает задержки 60–70 мс; если она
+есть, конфиги живые.
 
 ## После загрузки `networking.service` и `ifup@eth0` в статусе failed
 

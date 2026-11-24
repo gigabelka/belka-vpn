@@ -70,7 +70,7 @@ apply_defaults() {
   : "${FOREIGN_TUNNEL_IP:=172.16.0.1}"
   : "${RU_TUNNEL_IP:=172.16.0.2}"
   : "${SOCKS_PORT:=1080}"
-  : "${AWG_MTU:=1280}"
+  : "${AWG_MTU:=1240}"
   : "${SSH_PORT:=22}"
   : "${REALITY_SNI:=www.microsoft.com}"
   : "${ENABLE_UFW:=1}"

@@ -164,13 +164,22 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 
 - Hiddify Manager overwrites its generated Xray config on "Apply now". Change routing only
   through the panel UI; never edit its generated files.
+- RU's Hiddify subscription is deliberately Xray-only. All custom proxies with
+  `server_core=hiddify_core` (the `HC` configs) are disabled, and
+  `vmess/grpc/httpupgrade/xhttp/quic/h2` are off; only `vless`, `reality`, `tcp` remain.
+  hiddify-core routing has no `geoip:telegram`, so an HC config sends bare-IP Telegram
+  Direct from RU, where TCP to Telegram is blocked. Verify the subscription has no `HC`
+  and that `generated/xray.json` still routes `geoip:telegram` to a SOCKS outbound. The
+  client app refreshes its profile on its own interval; never change client settings.
 - Newer sing-box cores pulled by the Hiddify installer abort on Hiddify's implicit default
   HTTP client for remote rule-sets (`status=1` every 5 s). `install-ru.sh` installs a
   `hiddify-core.service` drop-in with `ENABLE_DEPRECATED_IMPLICIT_DEFAULT_HTTP_CLIENT=true`;
   without it the core crash-loops. Remove the drop-in once Hiddify emits the new config form.
-- `Jmax` must not exceed MTU (start at 1280; drop to 1240 on fragmentation). Obfuscation
-  parameters must match on both peers, and after rotation **both** handoffs must be
-  re-exchanged or the handshake stops. `AWG_ENABLE_S3S4=0` is the safe default.
+- `Jmax` must not exceed MTU. The live RU↔FOREIGN tunnel runs at `AWG_MTU=1240`
+  (lowered from 1280 after large-packet loss and jitter; 1200-byte payloads are clean,
+  exact-MTU 1212 can spike). Obfuscation parameters must match on both peers, and after
+  rotation **both** handoffs must be re-exchanged or the handshake stops.
+  `AWG_ENABLE_S3S4=0` is the safe default.
 - Google's own geo database can place the FOREIGN IPv4 in Russia while ipinfo/RIPE say
   otherwise; signed-in Gemini is then blocked. Check `x-country` via the SOCKS
   (`google_country` in `lib.sh`, also in `verify.sh`). `GOOGLE_IPV6_EGRESS=1` on FOREIGN

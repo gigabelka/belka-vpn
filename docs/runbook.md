@@ -181,6 +181,9 @@ hiddify admin   # ссылка — секрет
    - Direct последний;
    - `xray -test` проходит (нет неизвестных geosite-тегов).
 10. Users → Add user → ссылка/подписка.
+11. Custom Proxies: отключить все конфиги с `HC` (их обслуживает hiddify-core, где нет
+    `geoip:telegram`); в настройках протоколов оставить только VLESS, Reality и TCP.
+    Подписка должна содержать только Xray-конфиги.
 
 ## 8. Клиент
 
@@ -201,12 +204,52 @@ bash scripts/verify.sh --role foreign
 
 Клиентские проверки:
 
-1. `https://ipinfo.io` → российский IP.
+1. `https://api.ipify.org` (или `https://ifconfig.me/ip`) → российский IP. `ipinfo.io`
+   может уйти через FOREIGN, если его адрес попадает в `geoip:google`.
 2. Временно добавить `ipinfo.io` в `Sites` outbound FOREIGN-Domains → зарубежный IP; убрать.
-3. YouTube/Google/Claude/Telegram/Gemini работают; российские сайты идут Direct.
+3. YouTube/Google/Claude/Telegram/Gemini работают (включая медиа/видео Telegram);
+   российские сайты идут Direct.
 4. `api.anthropic.com` — не 403.
 5. DNS/IPv6 leak-тесты.
 6. Claude Code в TUN-режиме.
+
+## Текущее состояние: стабилизация Telegram (2026-11-24)
+
+После жалоб на нестабильный Telegram и медленные медиа на RU:
+
+1. Отключены все custom-proxy с `server_core=hiddify_core` (`HC`): 61 включённый →
+   `enable=0`. Причина — у hiddify-core нет `geoip:telegram`, Telegram по IP уходил в
+   Direct из РФ, где TCP до Telegram заблокирован.
+2. Отключены транспорты `vmess`, `grpc`, `httpupgrade`, `xhttp`, `quic`, `h2`;
+   оставлены `vless`, `reality`, `tcp`. Подписка отдаёт только Xray-конфиги
+   (`raw vless REALITY` и `rawhttp vless`).
+3. `AWG_MTU=1240` на обоих серверах (было 1280): на 1280 крупные пакеты терялись
+   (до 2%), RTT давал всплески до 0.9 с; на 1240 — 0% на 100×1200 Б.
+4. Клиент не настраивался: Hiddify app обновляет профиль по своему интервалу
+   (в текущем профиле 3600 с).
+
+Порядок изменения MTU (важно: handoff перекрывает env):
+
+```bash
+# на RU
+sed -i 's/^AWG_MTU=1280$/AWG_MTU=1240/' /etc/belka-vpn/ru.env \
+  /etc/belka-vpn/foreign-handoff.env /root/belka-foreign-handoff.env
+sed -i 's/^MTU = 1280$/MTU = 1240/' /etc/amnezia/amneziawg/awg0.conf
+systemctl restart awg-quick@awg0
+
+# на FOREIGN
+sed -i 's/^AWG_MTU=1280$/AWG_MTU=1240/' /etc/belka-vpn/foreign.env \
+  /root/belka-foreign-handoff.env
+sed -i 's/^MTU = 1280$/MTU = 1240/' /etc/amnezia/amneziawg/awg0.conf
+systemctl restart awg-quick@awg0
+```
+
+Проверка: `ip link show awg0` → `mtu 1240`; `awg show` → свежий handshake;
+`ping -c100 -s1200 172.16.0.1` с РФ → 0% потерь; `bash scripts/verify.sh` → PASS.
+
+При отключении HC/транспортов сначала сделайте `hiddify-panel-cli backup`, затем
+`hiddify apply --no-gui` (ошибка WARP `rc=1` безвредна). Подробности — в
+`docs/troubleshooting.md`, раздел «Telegram: нестабильность, медленные медиа».
 
 ## IPv6-выход для Google
 
