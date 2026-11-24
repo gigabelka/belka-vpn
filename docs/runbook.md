@@ -333,3 +333,22 @@ fail2ban-client unban --all     # если вас забанил fail2ban
 fail2ban на RU банит через маршрут (`banaction = route`), а не через iptables:
 забаненный адрес виден в `ip route show type unreachable`. Если fail2ban не
 отвечает, снимите бан вручную: `ip route del unreachable <ваш IP>`.
+
+## 12. Известные расхождения конфигурации серверов
+
+Состояние на 2026-11-24 (сверка серверов с репозиторием и документацией). Код в
+`/opt/belka-vpn` на обоих серверах совпадает с репозиторием, `verify.sh` проходит без
+FAIL. Ниже — отличия настроек самих серверов от того, что описано здесь. Документация
+остаётся эталоном; пункты закрываются на серверах.
+
+| Где | Расхождение | Влияние | Как устранить |
+|---|---|---|---|
+| RU, панель Hiddify | «Only IPv4» выключен (`only_ipv4 = 0`), документация требует ON | Сейчас никакого: у RU нет IPv6 | Settings → Advanced → Only IPv4 = ON, затем Apply now |
+| RU, `/etc/belka-vpn/ru.env` | `REALITY_SNI=www.microsoft.com`, а Reality в панели работает с другим SNI | Чек-лист печатает не тот SNI; на работу клиентов не влияет | Записать в `REALITY_SNI` фактический SNI из панели (Reality) и перезапустить `install-ru.sh` |
+| RU, `/root/belka-ru-manual-checklist.txt` | Собран из старой версии шаблона | Устаревший текст чек-листа | Обновится при следующем запуске `install-ru.sh` |
+| FOREIGN, `/etc/belka-vpn/foreign.env` | Лишняя переменная `REALITY_SNI` (на FOREIGN её никто не читает) | Нет | Удалить строку |
+| RU, `/etc/belka-vpn/foreign.env` | Посторонняя копия env зарубежного сервера | Нет; скрипты на RU её не читают | Удалить файл |
+| RU, `/etc/belka-vpn/foreign-handoff.env` | Handoff старого формата (содержит `REALITY_SNI`) | Нет: `install-ru.sh` восстанавливает `REALITY_SNI` из `ru.env` | Заменить свежим `/root/belka-foreign-handoff.env` с FOREIGN при следующем обмене handoff |
+
+После исправлений прогоните `bash scripts/verify.sh` на RU и
+`bash scripts/verify.sh --role foreign` на FOREIGN и удалите строку из таблицы.
