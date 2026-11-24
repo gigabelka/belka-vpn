@@ -115,7 +115,7 @@ Reality SNI candidate: ${REALITY_SNI}
      Signed-in "not supported in your country" while incognito works is not a
      routing bug first: check Google's country for the exit IP and the account
      country before touching the rules (docs/troubleshooting.md).
-       curl -4 -sS -o /dev/null -D - --socks5-hostname 172.16.0.1:1080 \
+       curl -4 -sS -o /dev/null -D - --socks5-hostname ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} \
          'https://clientservices.googleapis.com/chrome-variations/seed?osname=win&channel=stable&milestone=140' \
          | grep -i '^x-country'
        Account country: footer of https://policies.google.com/u/0/terms

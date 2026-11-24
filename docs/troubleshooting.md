@@ -11,7 +11,8 @@ bash scripts/configure.sh --role foreign   # или --role ru
 ```
 
 Файлы должны иметь режим `600`, а IP — быть реальными публичными адресами
-серверов (не loopback и не RFC1918).
+серверов: `configure.sh` отвергает `0.0.0.0`, loopback, RFC1918, link-local
+(`169.254/16`) и CGNAT (`100.64/10`), а также одинаковые IP у RU и FOREIGN.
 
 ## AmneziaWG не поднимается
 
@@ -282,7 +283,7 @@ jq -r '.routing.rules | to_entries[]
   (`gemini.google`, `ai.studio`, `generativeai.google`, `antigravity.google`, …),
   а также `rutracker.org`, `rutor.info` и `instagram.com` с CDN;
   Geosites — `geosite:google` и `geosite:google-gemini`; WARP OFF; порядок
-  FOREIGN-Domains → FOREIGN-Telegram-IP → Direct; Apply. Списки в `/root` уже без
+  FOREIGN-Domains → FOREIGN-Google-IP → FOREIGN-Telegram-IP → Direct; Apply. Списки в `/root` уже без
   комментариев: валидатор Hiddify не принимает строки `#`. Клиент: IPv6 off, DNS
   remote `1.1.1.1`, Resolve Destination OFF, TUN.
   В браузере отключите ECH и DoH (при ECH Xray не видит SNI). Очистите site data или
@@ -355,7 +356,8 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 
 - **Неизвестный geosite-тег** (`geosite:anthropic`, `category-ai-!cn` могут
   отсутствовать в вашей версии). Уберите тег, оставьте домены.
-- **Порядок outbounds**: WARP/Block выше Socks перехватывают трафик. WARP
+- **Порядок outbounds**: WARP/Block выше Socks перехватывают трафик, если у них
+  есть списки. Встроенный Block стоит первым — это нормально. WARP
   выключить, Block — без списков и с выключенным «Domestic sites»: иначе
   `geoip:ru`/`domain:ru` уходят в blackhole и российские сайты не открываются
   (`verify.sh` это проверяет).
@@ -588,10 +590,14 @@ netplan. Интерфейс уже настроил systemd-networkd, поэто
 Скрипты идемпотентны, но проверьте:
 
 ```bash
-git -C /opt/belka-vpn status --short
-bash -n scripts/*.sh
+bash tests/lint.sh       # без .git (копия из архива) сканирует все файлы
 bash scripts/verify.sh
 ```
+
+`/opt/belka-vpn`, доставленный архивом, не git-клон: `git status` там не работает.
+Чтобы убедиться, что на сервере нужная версия, сравните хеши файлов с коммитом
+(`git hash-object <файл>` на сервере против `git ls-tree -r <коммит>` локально)
+или передайте архив заново.
 
 Если конфиг изменился неожиданно, сравните `/etc/amnezia/amneziawg/awg0.conf`
 с шаблоном и handoff. Ключи и обфускация лежат в

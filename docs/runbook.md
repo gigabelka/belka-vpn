@@ -21,14 +21,12 @@ Get-Content "$env:USERPROFILE\.ssh\belka_vpn_ed25519.pub" | ssh root@<RU_IP> "um
 Get-Content "$env:USERPROFILE\.ssh\belka_vpn_ed25519.pub" | ssh root@<FOREIGN_IP> "umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys"
 ```
 
-Доставка репозитория (если GitHub с сервера недоступен):
+Доставка репозитория, если GitHub с сервера недоступен: архив из коммита с LF,
+передаётся из Git Bash — команды в разделе «Доставка кода на серверы с Windows» (§10).
+Для первой доставки добавьте `mkdir -p /opt/belka-vpn` перед `tar -x`.
 
-```powershell
-tar czf - scripts config docs tests .env.example | ssh -i <key> root@<RU_IP> "mkdir -p /opt/belka-vpn && tar xzf - -C /opt/belka-vpn"
-tar czf - scripts config docs tests .env.example | ssh -i <key> root@<FOREIGN_IP> "mkdir -p /opt/belka-vpn && tar xzf - -C /opt/belka-vpn"
-```
-
-Если GitHub доступен — используйте `bootstrap.sh` (см. README).
+Если GitHub доступен — `git clone` в `/opt/belka-vpn`, обновления через `bootstrap.sh`
+(см. README). `bootstrap.sh` работает только с git-клоном.
 
 ## 2. IP серверов: конфигуратор
 
@@ -77,12 +75,16 @@ bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 
 Что делает:
 
-1. ставит AmneziaWG (PPA), заголовки ядра, `awg-quick`;
-2. генерирует ключи зарубежного сервера и параметры обфускации;
-3. пишет `/etc/amnezia/amneziawg/awg0.conf` (пока без peer RU);
-4. ставит Xray-core, SOCKS на `172.16.0.1:1080`, systemd drop-in после `awg0`;
-5. настраивает UFW: SSH, UDP-порт только с российского IP, 1080 только на `awg0`;
-6. пишет `/root/belka-foreign-handoff.env`.
+1. ставит базовые пакеты, sysctl (BBR, буферы, `tcp_mtu_probing`), logrotate;
+2. ставит AmneziaWG (PPA), заголовки ядра, `awg-quick`;
+3. генерирует ключи зарубежного сервера и параметры обфускации;
+4. пишет `/root/belka-foreign-handoff.env`;
+5. пишет `/etc/amnezia/amneziawg/awg0.conf` (пока без peer RU) и поднимает `awg0`;
+6. при `GOOGLE_IPV6_EGRESS=1` — IPv6-выход для Google (см. ниже), иначе пропускается;
+7. ставит Xray-core, SOCKS на `172.16.0.1:1080`, systemd drop-in после `awg0`;
+8. настраивает UFW: SSH (`limit`), UDP-порт только с российского IP, 1080 (TCP и UDP)
+   только на `awg0` с `172.16.0.2`;
+9. fail2ban для SSH; при `HARDEN_SSH=1` — hardening SSH.
 
 Проверка:
 
@@ -131,9 +133,12 @@ scp -i <key> belka-foreign-handoff.env root@<RU_IP>:/root/belka-foreign-handoff.
 bash scripts/install-ru.sh --handoff /root/belka-foreign-handoff.env
 ```
 
-Порядок внутри скрипта: Hiddify Manager → AmneziaWG (пакет, ключи) → RU
-handoff → `awg0` → fail2ban → чек-лист. Hiddify ставится до поднятия тоннеля,
-чтобы инсталлятор не трогал `awg0`.
+Порядок внутри скрипта: базовые пакеты → Hiddify Manager (с drop-in
+`hiddify-core.service.d/belka-compat.conf`) → AmneziaWG (пакет, ключи) → RU handoff →
+`awg0` → отключение пересылки (`zz-belka-no-forward.conf`) → fail2ban
+(`banaction = route`) → чек-лист и списки в `/root` → hardening SSH (при
+`HARDEN_SSH=1`). Hiddify ставится до поднятия тоннеля, чтобы инсталлятор не трогал
+`awg0`.
 
 Проверка:
 
@@ -167,7 +172,8 @@ hiddify admin   # ссылка — секрет
    Outbound `FOREIGN-Telegram-IP`: Socks `172.16.0.1:1080`, только
    `/root/belka-foreign-telegram-ip.txt`.
 7. Порядок: FOREIGN-Domains → FOREIGN-Google-IP → FOREIGN-Telegram-IP → Direct
-   (default). WARP OFF.
+   (default). WARP OFF. Встроенный Block остаётся выше Socks, но без списков и с
+   Domestic sites OFF.
 8. Apply now.
 9. Проверить сгенерированный конфиг:
    - sniffing `http/tls/quic`, `routeOnly=false`;
@@ -327,3 +333,19 @@ fail2ban-client unban --all     # если вас забанил fail2ban
 fail2ban на RU банит через маршрут (`banaction = route`), а не через iptables:
 забаненный адрес виден в `ip route show type unreachable`. Если fail2ban не
 отвечает, снимите бан вручную: `ip route del unreachable <ваш IP>`.
+
+## 12. Известные расхождения конфигурации серверов
+
+Открытых расхождений нет. Последняя сверка — 2026-11-24: код в `/opt/belka-vpn` на
+обоих серверах совпадает с репозиторием, `verify.sh` проходит без FAIL (RU 26/0,
+FOREIGN 7/0).
+
+Закрыто 2026-11-24: на RU включён «Only IPv4»; `REALITY_SNI` в `ru.env` приведён к
+фактическому SNI Reality из панели, чек-лист в `/root` пересобран; сохранённый handoff
+на RU заменён свежим (без `REALITY_SNI`); удалены лишний `REALITY_SNI` из `foreign.env`
+на FOREIGN и посторонний `foreign.env` на RU. Бэкапы прежних файлов — в `/root`
+(`*.bak-<дата>`).
+
+Если при следующей сверке найдётся отличие сервера от документации, запишите его сюда
+таблицей «Где / Расхождение / Влияние / Как устранить» и удалите строку после
+исправления и успешного `verify.sh` на обоих серверах.
