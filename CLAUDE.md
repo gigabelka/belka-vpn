@@ -136,10 +136,14 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   and blank lines stripped (Hiddify rejects them), for the manual Hiddify setup.
 - `config/client/` — Hiddify app routing data, documentation-only (no script reads it):
   `hiddify-bypass.txt.example` is the Direct/bypass template, and
-  `hiddify-allowedips.txt` is its canonical inverse (199 CIDRs) for clients that take
-  `AllowedIPs` literally. The Hiddify app itself is configured through its GUI; its
-  `route_rule.proto` (binary protobuf) and `configs/*.json` (keys) are never edited or
-  committed.
+  `hiddify-allowedips.txt` is its canonical inverse (199 CIDRs). Per
+  `docs/hiddify-client.md`, the Hiddify app gets two IP-CIDR rules from that file: the
+  12 header ranges with outbound Direct on top, the 199 body with outbound Proxy below;
+  clients that take `AllowedIPs` literally get the 199 CIDRs in that field instead. The
+  Hiddify app is configured through its GUI; `route_rule.proto` (binary protobuf) and
+  `configs/*.json` (keys) are never committed. The only manual edit of `route_rule.proto`
+  is the documented, backup-first patch in `docs/hiddify-client.md` §8, done with the
+  Hiddify UI closed.
 
 ## Idempotency and state
 
@@ -188,6 +192,11 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   rendered Xray config is then unchanged.
 - Hiddify blocks QUIC/443 server-side, so YouTube/Google fall back to TCP. Claude Code
   does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
+- Hiddify app **Strict Route** blocks DNS (port 53) to resolvers outside the tunnel,
+  including a corporate NRPT server reached over ZeroTier. The site stays reachable by IP
+  (`curl --resolve` works) while names stop resolving; check
+  `Test-NetConnection <corp-DNS> -Port 80` (True) vs `-Port 53` (False). Keep Strict
+  Route off when a corporate NRPT zone is needed; that zone's DNS then goes direct.
 - Hiddify Manager removal is intentionally manual and destructive; `install-ru.sh
   --uninstall` leaves it installed.
 - Hiddify reruns its installer on every RU boot and auto-updates nightly; the installer
@@ -212,6 +221,6 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   plain `git archive` CRLF. Build with `git -c core.autocrlf=false -c core.eol=lf archive`
   and check for CR bytes with Python (Git Bash `grep $'\r'` misses them).
 - Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
-  order), `docs/hiddify-client.md` (Hiddify app setup, Direct rule, AllowedIPs,
+  order), `docs/hiddify-client.md` (Hiddify app setup, Direct and Proxy rules, AllowedIPs,
   strict route), `docs/troubleshooting.md` (diagnosis), and the Russian README quick
   start.

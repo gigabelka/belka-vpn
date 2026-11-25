@@ -523,55 +523,41 @@ RU. С этого же IP идут все клиенты VPN. На FOREIGN пр�
 Проверьте:
 
 ```powershell
-# какие DNS-серверы Windows NRPT назначает корпоративной зоне
-Get-DnsClientNrptRule | Where-Object Namespace -like '*.corp.example' |
+# NRPT: какая зона уходит на корпоративный DNS
+Get-DnsClientNrptPolicy | Where-Object Namespace -like '*.corp.example' |
   Format-List Namespace, NameServers
 
-# системный резолвер уходит по NRPT на корпоративный DNS
-nslookup corp.example
+# системный резолвер не получает ответ
+Resolve-DnsName corp.example
 
-# прямой запрос к корпоративному DNS (UDP/53 через ZeroTier)
-nslookup corp.example 192.0.2.10
+# хост доступен, но Strict Route блокирует порт 53
+Test-NetConnection 192.0.2.10 -Port 80    # True
+Test-NetConnection 192.0.2.10 -Port 53    # False, пока Strict Route включён
 
-# сайт жив, если обойти DNS: TCP 443 открыт и HTTPS отвечает
-Test-NetConnection 192.0.2.20 -Port 443
+# сайт жив, если обойти DNS
 curl.exe -I --resolve corp.example:443:192.0.2.20 https://corp.example/
 ```
 
-Если оба `nslookup` молчат, а `Test-NetConnection` и `curl --resolve` дают 200/302 —
-блокируется именно DNS, а не доступность сайта.
+Если `Resolve-DnsName` молчит, порт 80/443 у корпоративного DNS отвечает, а порт 53 —
+нет, а `curl --resolve` даёт 200/302, значит блокируется именно DNS.
 
-Почему так: NRPT-правила Windows отправляют DNS корпоративной зоны на
-корпоративный сервер `192.0.2.10`, доступный только через ZeroTier. Hiddify в режиме
-**TUN** с включённой «Строгой маршрутизацией» блокирует весь трафик порта 53 (TCP и UDP),
-идущий мимо DNS туннеля, — запрос до корпоративного сервера не доходит. TCP 80/443/445
-при этом работают: адрес сайта попадает в Direct-правило и уходит через ZeroTier, а не
-в Proxy.
+Почему так: NRPT-правила Windows отправляют DNS корпоративной зоны на корпоративный
+сервер `192.0.2.10`, доступный только через ZeroTier. Hiddify в режиме **TUN** с
+включённой «Строгой маршрутизацией» блокирует весь трафик порта 53 (TCP и UDP), идущий
+мимо DNS туннеля, — запрос до корпоративного сервера не доходит. TCP 80/443/445 при
+этом работают: адрес сайта уходит через ZeroTier напрямую, а не в Proxy.
 
 Что делать: в Hiddify app откройте **Настройки → Входящие → «Строгая маршрутизация»**
-(в англоязычной версии `Strict Route`), выключите её и переподключитесь. Проверьте, что
-`nslookup corp.example` отвечает, а сайт открывается.
+(в англоязычной версии `Strict Route`), выключите её и переподключитесь. Проверено на
+Hiddify 5.9.15: после этого `Resolve-DnsName corp.example` отвечает,
+`Test-NetConnection 192.0.2.10 -Port 53` — True, сайт открывается.
 
 Компромисс: «Строгая маршрутизация» — защита от DNS-утечек. Без неё DNS корпоративной
 зоны уходит напрямую на корпоративный сервер вне туннеля (именно это и нужно в доверенной
 сети), а остальной DNS по-прежнему идёт через remote-DNS провайдера. Держите переключатель
 выключенным, пока нужен корпоративный DNS.
 
-Убедитесь, что трафик идёт Direct:
-
-```powershell
-# LocalAddress должен быть адресом интерфейса ZeroTier, а не TUN Hiddify
-Get-NetTCPConnection -RemoteAddress 192.0.2.20 -State Established |
-  Select-Object LocalAddress, RemotePort
-
-tracert -d 192.0.2.20
-```
-
-Первый хоп — локальный шлюз/ZeroTier, в логах Hiddify соединение помечено `direct`.
-
-Пошаговая настройка клиента — `docs/hiddify-client.md`. Состояние клиента
-(`route_rule.proto`, `AppSettings.db`) вручную не правьте — настройки меняются только
-через GUI.
+Пошаговая настройка клиента — `docs/hiddify-client.md`.
 
 ## Telegram: сообщения работают, звонки нет
 

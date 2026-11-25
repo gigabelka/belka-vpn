@@ -190,7 +190,9 @@ hiddify admin   # ссылка — секрет
 - импорт `vless://`/подписки;
 - default Proxy, Bypass LAN ON, IPv6 Off, Region Other;
 - DNS remote `1.1.1.1`, Resolve Destination OFF;
-- desktop — TUN/VPN mode (Claude Code не умеет SOCKS).
+- desktop — TUN/VPN mode (Claude Code не умеет SOCKS);
+- два правила из `config/client/hiddify-allowedips.txt`: 12 исключений → Direct,
+  все 199 CIDR → Proxy (правило Proxy ниже правила Direct).
 
 ## 9. Проверка
 

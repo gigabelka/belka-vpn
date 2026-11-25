@@ -42,7 +42,7 @@ config/
   client/            # Direct-список и инверсный AllowedIPs для клиента Hiddify app
 docs/
   architecture.md    # подробная схема и обоснование
-  hiddify-client.md  # клиент Hiddify app: настройка, Direct-правило, AllowedIPs
+  hiddify-client.md  # клиент Hiddify app: настройка, Direct/Proxy-правила, AllowedIPs
   runbook.md         # пошаговое развёртывание
   troubleshooting.md # типовые проблемы
 tests/lint.sh        # bash -n, shellcheck, запрет реальных IP и устаревших имён
@@ -211,20 +211,22 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 - IPv6 — **Disabled**;
 - DNS — remote `1.1.1.1` через прокси;
 - Resolve Destination — **OFF**;
-- на десктопе — **TUN/VPN mode** (Claude Code не поддерживает SOCKS).
+- на десктопе — **TUN/VPN mode** (Claude Code не поддерживает SOCKS);
+- два правила маршрутизации из `config/client/hiddify-allowedips.txt`: 12 исключений →
+  **Напрямую**, все 199 адресов → **Proxy** (см. «Адреса в обход VPN»).
 
-Подробная пошаговая инструкция (импорт, Direct-правило, `AllowedIPs`, «Строгая
+Подробная пошаговая инструкция (импорт, Direct- и Proxy-правила, `AllowedIPs`, «Строгая
 маршрутизация», проверка) — `docs/hiddify-client.md`.
 
 #### Адреса в обход VPN
 
 Клиент по умолчанию отправляет всё в **Proxy**, а 12 диапазонов, перечисленных в шапке `config/client/hiddify-allowedips.txt`, уходят **Direct** — это и есть адреса, которые клиент игнорирует:
 
-1. **Настройки → Маршрутизация → добавить правило**, тип **IP CIDR**, outbound **Direct**, вставить эти 12 диапазонов. Образец формата — `config/client/hiddify-bypass.txt.example`; личные дополнения держите в `config/client/hiddify-bypass.local.txt` (он в `.gitignore` через `*.local.txt`). Сохранить правило и переподключиться.
-2. `config/client/hiddify-allowedips.txt` — обратная запись: 199 CIDR «весь интернет, кроме этих 12 исключений». Нужен клиентам и профилям, которые буквально понимают `AllowedIPs`; в Hiddify app то же самое делает Direct-правило из п. 1, поэтому вставлять 199 строк в приложение не требуется.
+1. **Настройки → Маршрутизация → добавить правило**, условие **«IP CIDR назначения»**, outbound **«Напрямую»** (Direct), вставить эти 12 диапазонов; правило должно стоять выше правила из п. 2. Образец формата — `config/client/hiddify-bypass.txt.example`; личные дополнения держите в `config/client/hiddify-bypass.local.txt` (он в `.gitignore` через `*.local.txt`). Сохранить правило и переподключиться.
+2. `config/client/hiddify-allowedips.txt` — обратная запись: 199 CIDR «весь интернет, кроме этих 12 исключений», то есть полный список `AllowedIPs`. Добавьте все 199 строк отдельным правилом **«IP CIDR назначения»** с outbound **Proxy** («Балансировка») **ниже** правила из п. 1. При default Proxy правило избыточно по эффекту, но делает whitelist явным; в профилях с полем `AllowedIPs` (сырой sing-box/WireGuard) те же строки вставляются прямо в него. Не добавляйте 199 строк в правило «Напрямую» — маршрутизация инвертируется.
 3. Проверка: `tracert -d <IP из Direct-списка>` — первый хоп через локальный шлюз, в логах Hiddify соединение идёт через `direct`.
 
-`C:\Program Files\Hiddify\Hiddify.exe` — лаунчер, а не конфиг. Состояние клиента лежит в `%APPDATA%\Hiddify\hiddify\route_rule.proto` (бинарный protobuf) и `configs\*.json` (там приватные ключи): вручную не правьте и в репозиторий не кладите.
+`C:\Program Files\Hiddify\Hiddify.exe` — лаунчер, а не конфиг. Состояние клиента лежит в `%APPDATA%\Hiddify\hiddify\route_rule.proto` (бинарный protobuf) и `configs\*.json` (там приватные ключи): при запущенном приложении не правьте и в репозиторий не кладите; исключение — добавление правил при закрытом Hiddify (§8 в `docs/hiddify-client.md`).
 
 ### 9. Проверка
 

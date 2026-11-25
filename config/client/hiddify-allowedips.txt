@@ -19,8 +19,11 @@
 # This is the canonical complement of those ranges: 199 CIDRs, no overlaps,
 # union = 0.0.0.0/0. Excluding the four /22 Direct ranges fragments the broad
 # 88/5, 176/5 and 184/6 blocks, so 199 entries are expected.
-# Apply the Direct list as an IP CIDR rule in the app; use this file only where
-# a client takes AllowedIPs literally. Paste the CIDR lines without comments.
+# Hiddify app: add the 12 exceptions above as an "IP CIDR" rule with outbound
+# Direct, then add all 199 CIDRs below as a second "IP CIDR" rule with outbound
+# Proxy; the Proxy rule must be lower, because the first match wins. Where a
+# client takes AllowedIPs literally (raw sing-box/WireGuard profile), paste the
+# 199 CIDR lines into that field instead. Paste CIDR lines without comments.
 0.0.0.0/5
 8.0.0.0/7
 11.0.0.0/8
