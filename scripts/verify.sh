@@ -94,7 +94,7 @@ check_hiddify_routing() {
   # Hiddify 14.x writes SOCKS endpoints as settings.address/port and tags them socks-<id>;
   # older layouts use settings.servers[0]. Support both.
   local socks_count socks_tags tags_json tag domain_count google_count google_full_count telegram_count
-  local ai_count domain_idx telegram_idx
+  local ai_count domain_idx telegram_idx rutracker_cc_count rutracker_wiki_count no_sniff_tags
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
      | select(.protocol == "socks")
@@ -198,6 +198,27 @@ check_hiddify_routing() {
     bad "Hiddify routes no rutracker/rutor/instagram domains to a SOCKS outbound"
   fi
 
+  # rutracker.org loads its CSS/JS/images from static.rutracker.cc and links the
+  # rutracker.wiki wiki; a missing host hangs on Direct and renders unstyled.
+  # Check the hosts separately: a combined count would pass with only one of them.
+  rutracker_cc_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "rutracker.cc" or . == "domain:rutracker.cc")] | length' "$cfg")
+  rutracker_wiki_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "rutracker.wiki" or . == "domain:rutracker.wiki")] | length' "$cfg")
+  if (( rutracker_cc_count > 0 && rutracker_wiki_count > 0 )); then
+    ok "Hiddify routes rutracker.cc/rutracker.wiki (rutracker static assets/wiki) to a SOCKS outbound"
+  elif (( rutracker_cc_count > 0 || rutracker_wiki_count > 0 )); then
+    warn "Hiddify routes only part of rutracker.cc/rutracker.wiki; paste the full /root/belka-foreign-domains.txt"
+  else
+    warn "Hiddify does not route rutracker.cc/rutracker.wiki; rutracker.org loads slowly without styles/images"
+  fi
+
   telegram_count=$(jq --argjson tags "$tags_json" '
     [.routing.rules[]?
      | select(.outboundTag as $t | ($tags | index($t // "")) != null)
@@ -262,15 +283,21 @@ check_hiddify_routing() {
     ok "Hiddify does not blackhole Russian sites (Block: Domestic sites OFF)"
   fi
 
-  if jq -e '
+  # Hiddify 14.2 generates the REALITY-termination inbounds without "sniffing"
+  # (xray/server/presets/reality_termination.j2), so a connection whose
+  # destination arrives as a bare IP cannot match domain rules and leaves via
+  # Direct. install-ru.sh overrides that built-in proxy template; every
+  # client-facing VLESS inbound must sniff with routeOnly=false.
+  no_sniff_tags=$(jq -r '
       [.inbounds[]?
-       | select(.protocol == "vless"
-                and (.sniffing.enabled // false)
-                and ((.sniffing.routeOnly // false) == false))
-      ] | length > 0' "$cfg" >/dev/null 2>&1; then
-    ok "Hiddify VLESS inbound sniffs SNI (routeOnly=false)"
+       | select(.protocol == "vless")
+       | select(((.sniffing.enabled // false) == false)
+                or ((.sniffing.routeOnly // false) == true))
+       | (.tag // "(no tag)")] | join(", ")' "$cfg")
+  if [[ -z $no_sniff_tags ]]; then
+    ok "all Hiddify VLESS inbounds sniff SNI (routeOnly=false)"
   else
-    bad "Hiddify VLESS inbounds do not sniff SNI with routeOnly=false"
+    bad "Hiddify VLESS inbound(s) without sniffing: ${no_sniff_tags}; domain rules miss for clients that send bare IPs (run install-ru.sh to apply the REALITY-termination override)"
   fi
 }
 

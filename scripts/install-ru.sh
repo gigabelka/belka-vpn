@@ -189,6 +189,93 @@ install_hiddify() {
   log INFO "installer output saved to $out (0600, contains the admin link)"
 }
 
+# Hiddify 14.2 generates the REALITY-termination inbounds without "sniffing"
+# (xray/server/presets/reality_termination.j2), so a connection whose destination
+# arrives as a bare IP cannot match FOREIGN-Domains and leaves via Direct. The
+# panel exposes a built-in-proxy server-config override; store the sniffing block
+# there (it survives catalog sync and Hiddify upgrades) and regenerate configs.
+apply_hiddify_reality_sniffing() {
+  [[ -d /opt/hiddify-manager ]] || return 0
+  [[ ${INSTALL_HIDDIFY:-1} == 1 ]] || { log INFO "Hiddify sniffing override skipped (Hiddify install disabled)"; return 0; }
+  local py out
+  py=$(compgen -G '/opt/hiddify-manager/.venv*/bin/python' | head -n1 || true)
+  if [[ -z $py || ! -x $py ]]; then
+    warn "hiddifypanel venv not found; cannot apply the REALITY-termination sniffing override"
+    return 0
+  fi
+  out=$( cd /opt/hiddify-manager && "$py" - <<'PY' 2>&1
+import os
+import sys
+
+os.chdir('/opt/hiddify-manager')
+from hiddifypanel.base import create_app
+
+app = create_app()
+with app.app_context():
+    from hiddifypanel.models.custom_proxy import CustomProxy
+    from hiddifypanel.proxy_v3.api.custom_proxy_api import _prepare_create_data
+
+    rows = CustomProxy.query.filter_by(slug='xray-reality-termination').all()
+    if not rows:
+        print('BELKA_SNIFF_MISSING')
+        sys.exit(0)
+    for row in rows:
+        data = row.to_dict()
+        cfg = dict(data.get('server_config') or {})
+        tmpl = cfg.get('inbound_template') or ''
+        if '"sniffing"' in tmpl:
+            print('BELKA_SNIFF_PRESENT', row.id, row.child_id)
+            continue
+        needle = '"protocol": "vless",'
+        if tmpl.count(needle) != 1:
+            print('BELKA_SNIFF_UNEXPECTED', row.id, tmpl.count(needle))
+            continue
+        sniff = ('"sniffing": {\n'
+                 '                "enabled": true,\n'
+                 '                "destOverride": ["http", "tls", "quic"],\n'
+                 '                "routeOnly": false\n'
+                 '            },')
+        cfg['inbound_template'] = tmpl.replace(needle, needle + '\n            ' + sniff, 1)
+        data['server_config'] = cfg
+        data['server_override'] = True
+        data['id'] = row.id
+        data = _prepare_create_data(data)
+        CustomProxy.add_or_update(**data)
+        print('BELKA_SNIFF_APPLIED', row.id, row.child_id)
+PY
+  ) || true
+  case $out in
+    *BELKA_SNIFF_APPLIED*) log INFO "Hiddify REALITY-termination sniffing override applied" ;;
+    *BELKA_SNIFF_PRESENT*) log INFO "Hiddify REALITY-termination sniffing override already present" ;;
+    *BELKA_SNIFF_UNEXPECTED*) warn "Hiddify REALITY-termination template shape changed; apply the sniffing override from the panel" ;;
+    *BELKA_SNIFF_MISSING*) warn "Hiddify REALITY-termination proxy not found; apply the sniffing override from the panel" ;;
+    *) warn "could not apply the Hiddify REALITY-termination sniffing override: $(printf '%s\n' "$out" | tail -n 3)" ;;
+  esac
+
+  local cfg=/opt/hiddify-manager/generated/xray.json
+  local needs_regen=0
+  if [[ -f $cfg ]] && jq -e '
+      [.inbounds[]?
+       | select((.tag // "") | test("reality terminator"))
+       | select(((.sniffing.enabled // false) == false)
+                or ((.sniffing.routeOnly // false) == true))
+      ] | length == 0' "$cfg" >/dev/null 2>&1; then
+    log INFO "generated Xray config already sniffs on the REALITY terminator"
+  else
+    needs_regen=1
+    log INFO "regenerating Hiddify configs to apply the REALITY sniffing override"
+    /opt/hiddify-manager/scripts/hiddify sync-configs >>"$LOG" 2>&1 \
+      || warn "hiddify sync-configs failed; check Hiddify logs and rerun"
+  fi
+  # sync-configs rewrites generated/xray.json but does not restart Xray, so the
+  # running process would keep the old inbound definitions.
+  if (( needs_regen )) || ! systemctl is-active -q hiddify-xray; then
+    systemctl restart hiddify-xray >>"$LOG" 2>&1 \
+      || warn "hiddify-xray restart failed; check systemctl status hiddify-xray"
+    log INFO "hiddify-xray restarted to load the REALITY sniffing override"
+  fi
+}
+
 write_ru_handoff() {
   local f=/root/belka-ru-handoff.env
   write_if_changed "$f" 600 <<EOF
@@ -302,6 +389,7 @@ main() {
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write the hiddify-core compatibility drop-in,"
+    log INFO "dry-run: apply the REALITY-termination sniffing override (built-in proxy server_config) and regenerate Hiddify configs,"
     log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT, set IP forwarding (RU_IP_FORWARD=$RU_IP_FORWARD)"
     log INFO "dry-run: and print the manual checklist"
     exit 0
@@ -351,6 +439,7 @@ EOF
   install_base_packages
   preflight_ru
   install_hiddify
+  apply_hiddify_reality_sniffing
   install_amneziawg
   gen_keypair
   write_ru_handoff

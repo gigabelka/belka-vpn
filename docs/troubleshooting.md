@@ -137,6 +137,86 @@ ping -q -c 500 -i 0.1 172.16.0.1 & ping -q -c 500 -i 0.1 <FOREIGN_PUBLIC_IP>; wa
 `--socks5-hostname 172.16.0.1:1080` открывается. Если такие сайты нужны, добавьте их в
 `FOREIGN-Domains`. Для Hetzner в базе Hiddify есть `geosite:hetzner`.
 
+## Сайт грузится долго и без стилей/картинок
+
+Признак: HTML приходит быстро (`curl` к странице даёт `200` за секунду), а браузер
+долго крутит загрузку и показывает страницу без оформления. Причина — статика лежит
+на другом домене, которого нет в `FOREIGN-Domains`, и уходит в `Direct`, где
+заблокирована. Пример: `rutracker.org` тянет CSS/JS/картинки с `static.rutracker.cc`.
+
+Проверка на клиенте — какие хосты использует страница и какие из них висят:
+
+```bash
+curl -sS https://rutracker.org/forum/index.php \
+  | grep -oE '(src|href)="(https?:)?//[^/"]+' | sed -E 's#.*//##' | sort | uniq -c
+curl -sS -m 15 -o /dev/null -w '%{http_code} %{time_total}\n' https://static.rutracker.cc/opensearch.xml
+```
+
+Хост с таймаутом добавьте (базовым доменом) в `config/rules/foreign-domains.txt` и в
+`FOREIGN-Domains` в панели.
+
+Если же соединения к самому сайту падают примерно в половине случаев (а не только
+статика), это другая причина — см. следующий раздел.
+
+## Сайт открывается через раз / часть соединений уходит в Direct
+
+Признак: один и тот же сайт (например, `rutracker.org` в браузере) грузится
+нестабильно — примерно половина соединений падает по таймауту на этапе TCP
+connect, остальные проходят. Повторные запросы дают то `200`, то ошибку
+соединения. Другие сайты при этом открываются нормально. Страдают именно доменные
+правила (`rutracker`, `rutor`, `instagram`); Google, YouTube и Telegram работают,
+потому что их ловят `geoip:google` и `geoip:telegram` по IP.
+
+Причина — на сервере. В Hiddify 14.2 входящие REALITY Termination генерируются без
+блока `sniffing` (`xray/server/presets/reality_termination.j2`): сервер не
+восстанавливает домен из TLS-приветствия. Если клиент отправляет адрес назначения
+как IP (TUN без клиентского sniffing), для соединений, попавших на этот inbound,
+доменное правило `FOREIGN-Domains` не срабатывает, и трафик уходит в `Direct` с
+российского IP, где сайт заблокирован. Входящий без REALITY сниффит, поэтому часть
+соединений работает; при «Балансировке»/round-robin в клиенте они чередуются.
+
+Проверка на клиенте — повторите запрос и посчитайте неудачи:
+
+```bash
+for i in $(seq 10); do
+  curl -4 -sS -m 10 -o /dev/null -w '%{http_code}\n' https://rutracker.org/forum/index.php || echo FAIL
+done
+```
+
+`000`/`FAIL` — таймаут TCP connect, `200` — соединение прошло.
+
+Проверка на RU — куда уходят SYN при неудаче и при успехе (нужен root,
+`<IP-сайта>` — адрес из DNS-ответа на клиенте):
+
+```bash
+tcpdump -ni any -c 40 'tcp[tcpflags] & tcp-syn != 0 and (host <IP-сайта> or (host 172.16.0.1 and port 1080))'
+```
+
+SYN на `eth0` к `<IP-сайта>` — соединение ушло в `Direct` и блокируется в РФ; SYN к
+`172.16.0.1:1080` — ушло через SOCKS на FOREIGN.
+
+Исправление — серверное: `install-ru.sh`
+(`apply_hiddify_reality_sniffing`) включает sniffing у встроенного прокси «REALITY
+Termination» через штатный override `server_config` в БД панели и перегенерирует
+конфиги. Override переживает sync каталога и обновления Hiddify. Клиент менять не
+нужно.
+
+Проверьте результат:
+
+```bash
+bash scripts/verify.sh | grep -i sniff
+```
+
+Должно быть `all Hiddify VLESS inbounds sniff SNI (routeOnly=false)`. Если после
+обновления Hiddify override пропал, `verify.sh` покажет `VLESS inbound(s) without
+sniffing` — повторите `install-ru.sh` (он делает `hiddify sync-configs` и
+перезапускает `hiddify-xray`), либо включите override в панели, примените конфиг и
+перезапустите `hiddify-xray`. Сам `hiddify sync-configs` только перегенерирует
+`generated/xray.json` и не перезапускает Xray.
+
+Не путать с разделом выше (статика на другом домене не грузится *всегда*) и с
+разделом ниже (ECH/DoH ломает сайт в браузере, но не в curl).
+
 ## Сайт не открывается в браузере, но работает через curl/SOCKS
 
 Признак: домен есть в `/root/belka-foreign-domains.txt`, `curl` через SOCKS на RU

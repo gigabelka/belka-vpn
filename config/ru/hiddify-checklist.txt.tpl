@@ -86,7 +86,8 @@ Reality SNI candidate: ${REALITY_SNI}
 5) Actions -> Apply now
 
 6) Verify the generated Xray config
-   - sniffing enabled (http/tls/quic), routeOnly = false
+   - sniffing enabled (http/tls/quic), routeOnly = false on ALL VLESS inbounds,
+     including "reality terminator" (install-ru.sh applies the built-in-proxy override)
    - three SOCKS outbounds on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}
    - geoip:google only in its own rule, below the domain rule
    - Direct is last/default
@@ -108,8 +109,10 @@ Reality SNI candidate: ${REALITY_SNI}
 
 9) Tests
    - youtube.com, google.com, claude.ai -> through FOREIGN
-   - rutracker.org, rutor.info, instagram.com -> through FOREIGN (media loads;
+   - rutracker.org (with styles), rutor.info, instagram.com -> through FOREIGN (media loads;
      torrent announces reach the tracker)
+   - rutracker.org must open 10/10 times; "every other request" means a VLESS inbound
+     without sniffing - run scripts/verify.sh
    - gemini.google.com opens without "not available in your country"
      (signed out; an account with RU country stays blocked by account country)
      Signed-in "not supported in your country" while incognito works is not a

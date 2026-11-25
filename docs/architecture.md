@@ -41,7 +41,7 @@ Hiddify Manager (v14.x, проверено на 14.2.0) собирает Xray-к
 
 Поэтому:
 
-- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`. Сюда же входят заблокированные в РФ торрент-трекеры (`rutracker.org`, `rutor.info` с announce-хостами `t-ru.org` и вспомогательными `dler.cc`) и Instagram с CDN (`cdninstagram.com`, `fbcdn.net`): для них нет geosite-тегов, поэтому хосты перечислены явно.
+- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`. Сюда же входят заблокированные в РФ торрент-трекеры (`rutracker.org` со статикой на `rutracker.cc`, `rutor.info` с announce-хостами `t-ru.org` и вспомогательными `dler.cc`) и Instagram с CDN (`cdninstagram.com`, `fbcdn.net`): для них нет geosite-тегов, поэтому хосты перечислены явно.
 - **FOREIGN-Google-IP** — только `geoip:google`, ниже FOREIGN-Domains. Ловит соединения к адресам Google без домена (приложения, которые ходят по IP, хосты вне доменных списков), чтобы залогиненная сессия Google не видела российский IP рядом с зарубежным.
 - **FOREIGN-Telegram-IP** — только `geoip:telegram`, ниже FOREIGN-Domains. Telegram-клиенты ходят на hardcoded IP без SNI.
 - **Direct** — последний и default.
@@ -71,6 +71,16 @@ Hiddify Manager (v14.x, проверено на 14.2.0) собирает Xray-к
 - `geosite:`/`geoip:` применяются только в Xray-routing;
 - rule-sets (`.srs`/`.json`) — только в hiddify-core routing;
 - Xray-sniffing с `destOverride: [http, tls, quic]` и `routeOnly=false` переподставляет домен вместо IP, поэтому SOCKS-запрос уходит на зарубежный сервер с доменом.
+- Hiddify 14.2 генерирует входящие REALITY Termination (`reality terminator …`)
+  **без** блока `sniffing` (`xray/server/presets/reality_termination.j2`). Поэтому
+  `install-ru.sh` (`apply_hiddify_reality_sniffing`) через штатный override
+  `server_config` встроенного прокси добавляет `sniffing` с
+  `destOverride: [http, tls, quic]` и `routeOnly=false` и перегенерирует конфиги.
+  Без этого клиент, отправляющий адрес как IP (TUN без клиентского sniffing,
+  «Балансировка»/round-robin по конфигам подписки), теряет доменные правила на
+  таких соединениях: rutracker/rutor/instagram уходят Direct, а Google/Telegram
+  выживают за счёт `geoip`. Override хранится в БД панели и переживает sync
+  каталога и обновления; `verify.sh` требует sniffing у всех VLESS-inbound.
 
 Если оставить Hiddify Core, Google может уйти на зарубежный сервер по российскому IP. Поэтому в панели обязательно:
 

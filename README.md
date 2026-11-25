@@ -243,7 +243,8 @@ bash scripts/verify.sh --role foreign
 - handshake AmneziaWG свежий;
 - `curl --socks5-hostname 172.16.0.1:1080 https://api.ipify.org` → зарубежный IP;
 - YouTube через зарубежный сервер → 204;
-- rutracker.org, rutor.info и instagram.com открываются через зарубежный сервер (медиа Instagram грузится);
+- `verify.sh` требует sniffing (`http/tls/quic`, `routeOnly=false`) у **всех** VLESS-inbound, включая `reality terminator`: без этого часть соединений к rutracker/instagram уходит в `Direct` (см. `docs/troubleshooting.md`);
+- rutracker.org (со стилями и картинками с `static.rutracker.cc`), rutor.info и instagram.com открываются через зарубежный сервер (медиа Instagram грузится);
 - `gemini.google.com` не показывает «недоступно в вашей стране»;
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
 - в клиенте `api.ipify.org` → российский IP (`ipinfo.io` может уйти через FOREIGN, если его адрес попадает в `geoip:google`), а YouTube/Google/Claude и Telegram (сообщения и медиа) идут через зарубежный сервер.

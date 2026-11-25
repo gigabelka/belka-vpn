@@ -80,8 +80,13 @@ web.telegram.org
 # Torrent trackers blocked in Russia: site, announce hosts and mirrors.
 # t-ru.org covers the announce hosts bt.t-ru.org, bt2.t-ru.org, bt3.t-ru.org,
 # bt4.t-ru.org; dler.cc is where rutor.info serves the .torrent files.
+# rutracker.cc serves the rutracker.org static assets (static.rutracker.cc:
+# CSS/JS/images) and feed.rutracker.cc; without it the forum page hangs and
+# renders without styles. rutracker.wiki is the linked wiki.
 rutracker.org
 rutracker.net
+rutracker.cc
+rutracker.wiki
 t-ru.org
 
 rutor.info

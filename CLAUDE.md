@@ -109,7 +109,8 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   exit-IP country and the account country, not by routing.
 - Services blocked in Russia are listed explicitly in
   `config/rules/foreign-domains.txt` because no geosite tag is assumed for them:
-  `rutracker.org`/`rutracker.net` plus announce host `t-ru.org`, `rutor.info` with
+  `rutracker.org`/`rutracker.net` with static host `rutracker.cc` (CSS/JS/images;
+  without it the forum hangs unstyled) and announce host `t-ru.org`, `rutor.info` with
   mirrors and `dler.cc` (serves `.torrent`), and `instagram.com` with its CDN
   (`cdninstagram.com`, `fbcdn.net`). `verify.sh` checks the three main hosts.
 - Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
@@ -168,6 +169,17 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 
 - Hiddify Manager overwrites its generated Xray config on "Apply now". Change routing only
   through the panel UI; never edit its generated files.
+- Hiddify 14.2 generates the REALITY-termination inbounds (`reality terminator …`) with no
+  `sniffing` block (`xray/server/presets/reality_termination.j2`). A client that sends
+  destination IPs (Hiddify app TUN with Balance/round-robin over the subscription's
+  configs) then loses domain matching on those connections: domain-listed sites
+  (rutracker, rutor, instagram) go Direct, while `geoip`-based Google/Telegram still work.
+  `install-ru.sh` (`apply_hiddify_reality_sniffing`) stores a built-in-proxy
+  `server_config` override with `sniffing (http/tls/quic), routeOnly=false`; `verify.sh`
+  requires sniffing on every VLESS inbound. Never add sniffing by editing
+  `generated/xray.json` or site-packages: Hiddify regenerates/overwrites both.
+  `hiddify sync-configs` only rewrites `generated/xray.json`; restart `hiddify-xray`
+  afterwards to load it.
 - RU's Hiddify subscription is deliberately Xray-only. All custom proxies with
   `server_core=hiddify_core` (the `HC` configs) are disabled, and
   `vmess/grpc/httpupgrade/xhttp/quic/h2` are off; only `vless`, `reality`, `tcp` remain.
