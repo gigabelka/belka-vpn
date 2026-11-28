@@ -36,9 +36,9 @@ apply_defaults
 
 if [[ $TARGET_ROLE == ru ]]; then
   if [[ -r $BELKA_CONFIG_DIR/foreign-handoff.env ]]; then
-    load_handoff "$BELKA_CONFIG_DIR/foreign-handoff.env"
+    load_handoff "$BELKA_CONFIG_DIR/foreign-handoff.env" foreign
   elif [[ -r /root/belka-foreign-handoff.env ]]; then
-    load_handoff /root/belka-foreign-handoff.env
+    load_handoff /root/belka-foreign-handoff.env foreign
   else
     warn "FOREIGN handoff not found; using env defaults for the tunnel endpoints"
   fi
@@ -79,11 +79,11 @@ check_hiddify_routing() {
   local cfg=/opt/hiddify-manager/generated/xray.json
   [[ -d /opt/hiddify-manager ]] || return 0
   if [[ ! -r $cfg ]]; then
-    warn "Hiddify xray config not found: $cfg (panel not applied yet?)"
+    bad "Hiddify xray config not found: $cfg (apply the panel and rerun verify)"
     return 0
   fi
   if ! command -v jq >/dev/null 2>&1; then
-    warn "jq not found; skipping Hiddify routing checks"
+    bad "jq not found; cannot verify Hiddify routing"
     return 0
   fi
   if ! jq -e . "$cfg" >/dev/null 2>&1; then
@@ -95,7 +95,7 @@ check_hiddify_routing() {
   # older layouts use settings.servers[0]. Support both.
   local socks_count socks_tags tags_json tag domain_count google_count google_full_count telegram_count
   local ai_count domain_idx telegram_idx rutracker_cc_count rutracker_wiki_count no_sniff_tags
-  local openai_count chatgpt_count openai_geo_count
+  local openai_count chatgpt_count openai_geo_count vless_count
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
      | select(.protocol == "socks")
@@ -203,8 +203,10 @@ check_hiddify_routing() {
               or . == "geosite:category-ai-!cn")] | length' "$cfg")
   if (( openai_count > 0 && chatgpt_count > 0 )); then
     ok "Hiddify routes openai.com/chatgpt.com (OpenAI/ChatGPT/Codex) to a SOCKS outbound"
-  elif (( openai_count > 0 || chatgpt_count > 0 || openai_geo_count > 0 )); then
-    warn "Hiddify routes only part of OpenAI/ChatGPT (or geosite only); paste the full /root/belka-foreign-domains.txt"
+  elif (( openai_geo_count > 0 )); then
+    warn "Hiddify routes OpenAI/ChatGPT only via geosite (or geosite plus part of the explicit list); paste the full /root/belka-foreign-domains.txt"
+  elif (( openai_count > 0 || chatgpt_count > 0 )); then
+    bad "Hiddify routes only part of OpenAI/ChatGPT and has no geosite fallback; paste the full /root/belka-foreign-domains.txt"
   else
     bad "Hiddify routes no openai.com/chatgpt.com (ChatGPT/Codex leave via Direct); full:openai.com does not cover api.openai.com"
   fi
@@ -291,7 +293,7 @@ check_hiddify_routing() {
      | select(((.value.ip // []) | index("geoip:google")) != null)
      | .key] | min // -1' "$cfg")
   if [[ $google_ip_idx == -1 ]]; then
-    warn "Hiddify has no geoip:google rule to a SOCKS outbound (FOREIGN-Google-IP); Google connections without a domain leave via Direct"
+    bad "Hiddify has no geoip:google rule to a SOCKS outbound (FOREIGN-Google-IP); Google connections without a domain leave via Direct"
   elif [[ $domain_idx != -1 ]] && (( domain_idx < google_ip_idx )); then
     ok "Hiddify routes geoip:google to a SOCKS outbound, after the domain lists"
   else
@@ -315,17 +317,26 @@ check_hiddify_routing() {
   # (xray/server/presets/reality_termination.j2), so a connection whose
   # destination arrives as a bare IP cannot match domain rules and leaves via
   # Direct. install-ru.sh overrides that built-in proxy template; every
-  # client-facing VLESS inbound must sniff with routeOnly=false.
+  # client-facing VLESS inbound must sniff http/tls/quic with routeOnly=false.
+  vless_count=$(jq '[.inbounds[]? | select(.protocol == "vless")] | length' "$cfg")
   no_sniff_tags=$(jq -r '
+      def sniff_ok:
+        ((.sniffing.enabled // false) == true)
+        and ((.sniffing.routeOnly // false) == false)
+        and (([(.sniffing.destOverride // [])[]
+               | select(. == "http" or . == "tls" or . == "quic")]
+              | unique | length) == 3);
       [.inbounds[]?
        | select(.protocol == "vless")
-       | select(((.sniffing.enabled // false) == false)
-                or ((.sniffing.routeOnly // false) == true))
-       | (.tag // "(no tag)")] | join(", ")' "$cfg")
-  if [[ -z $no_sniff_tags ]]; then
-    ok "all Hiddify VLESS inbounds sniff SNI (routeOnly=false)"
+       | select(sniff_ok | not)
+       | (.tag // "(no tag)")]
+      | join(", ")' "$cfg")
+  if (( vless_count == 0 )); then
+    bad "Hiddify has no VLESS inbounds; the client-facing Reality inbound is missing"
+  elif [[ -z $no_sniff_tags ]]; then
+    ok "all ${vless_count} Hiddify VLESS inbound(s) sniff http/tls/quic (routeOnly=false)"
   else
-    bad "Hiddify VLESS inbound(s) without sniffing: ${no_sniff_tags}; domain rules miss for clients that send bare IPs (run install-ru.sh to apply the REALITY-termination override)"
+    bad "Hiddify VLESS inbound(s) without full sniffing: ${no_sniff_tags}; require enabled http/tls/quic with routeOnly=false (run install-ru.sh)"
   fi
 }
 

@@ -18,6 +18,7 @@ ROLE=""
 REF=main
 ENV_FILE=""
 PASSTHROUGH=()
+DRY_RUN=0
 
 usage() {
   cat <<'EOF'
@@ -41,7 +42,15 @@ while (( $# )); do
     --ref) REF=$2; shift 2 ;;
     --env-file) ENV_FILE=$2; shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    --) shift; PASSTHROUGH+=("$@"); break ;;
+    --dry-run) DRY_RUN=1; PASSTHROUGH+=("$1"); shift ;;
+    --)
+      shift
+      for arg in "$@"; do
+        if [[ $arg == --dry-run ]]; then DRY_RUN=1; fi
+      done
+      PASSTHROUGH+=("$@")
+      break
+      ;;
     *) PASSTHROUGH+=("$1"); shift ;;
   esac
 done
@@ -66,6 +75,20 @@ fi
 if [[ ! -r $ENV_FILE ]]; then
   echo "env file not found: $ENV_FILE" >&2
   exit 1
+fi
+
+if (( DRY_RUN )); then
+  INSTALLER="$DEST/scripts/install-${ROLE}.sh"
+  if [[ ! -r $INSTALLER ]]; then
+    echo "dry-run: no usable checkout at $DEST (missing $INSTALLER)" >&2
+    echo "run bootstrap.sh once without --dry-run, or run the installer from an existing checkout" >&2
+    exit 1
+  fi
+  echo "dry-run: skipping apt-get and git update"
+  if [[ $REF != main ]]; then
+    echo "dry-run: --ref $REF ignored (no git update)"
+  fi
+  exec env ENV_FILE="$ENV_FILE" bash "$INSTALLER" "${PASSTHROUGH[@]}"
 fi
 
 export DEBIAN_FRONTEND=noninteractive
