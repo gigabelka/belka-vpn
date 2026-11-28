@@ -24,7 +24,7 @@
   "outbounds": [
     {
       "tag": "direct",
-      "protocol": "freedom",
+      "protocol": "freedom",${XRAY_DIRECT_SEND_THROUGH}
       "settings": {
         "domainStrategy": "UseIPv4"
       }

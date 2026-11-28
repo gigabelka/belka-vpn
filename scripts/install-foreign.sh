@@ -144,6 +144,33 @@ validate_google_ipv6() {
   fi
 }
 
+foreign_egress_ipv4_is_local() {
+  local local_ips
+  local_ips=$(ip -4 -o addr show scope global 2>/dev/null \
+    | awk '{print $4}' | cut -d/ -f1 || true)
+  grep -Fxq "$FOREIGN_EGRESS_IPV4" <<< "$local_ips"
+}
+
+# Optional source address for the direct outbound. It must be a valid IPv4
+# assigned to a local interface, otherwise Xray fails at bind time. A dry run
+# only warns: the address may not be attached yet.
+validate_foreign_egress_ipv4() {
+  [[ -n ${FOREIGN_EGRESS_IPV4:-} ]] || return 0
+  ipv4_to_int "$FOREIGN_EGRESS_IPV4" >/dev/null \
+    || die "FOREIGN_EGRESS_IPV4 is not a valid IPv4 address: $FOREIGN_EGRESS_IPV4"
+  case "$FOREIGN_EGRESS_IPV4" in
+    "$FOREIGN_TUNNEL_IP"|"$RU_TUNNEL_IP")
+      die "FOREIGN_EGRESS_IPV4 must not be a tunnel IP: $FOREIGN_EGRESS_IPV4" ;;
+  esac
+  if (( DRY_RUN )); then
+    foreign_egress_ipv4_is_local \
+      || warn "dry-run: FOREIGN_EGRESS_IPV4=$FOREIGN_EGRESS_IPV4 is not assigned to a local interface yet"
+    return 0
+  fi
+  foreign_egress_ipv4_is_local \
+    || die "FOREIGN_EGRESS_IPV4=$FOREIGN_EGRESS_IPV4 is not assigned to a local interface (ip -4 -o addr show)"
+}
+
 he_tunnel_wanted() { [[ $GOOGLE_IPV6_EGRESS == 1 && -n $HE_SERVER_IPV4 ]]; }
 
 # Tunnel server of the installed unit, so a changed or cleared env can still
@@ -301,7 +328,12 @@ backup_xray_config() {
 
 render_xray() {
   xray_google_v6_fragments
-  export FOREIGN_TUNNEL_IP SOCKS_PORT XRAY_EXTRA_OUTBOUNDS XRAY_EXTRA_RULES
+  XRAY_DIRECT_SEND_THROUGH=""
+  if [[ -n ${FOREIGN_EGRESS_IPV4:-} ]]; then
+    printf -v XRAY_DIRECT_SEND_THROUGH '\n      "sendThrough": "%s",' "$FOREIGN_EGRESS_IPV4"
+  fi
+  export FOREIGN_TUNNEL_IP SOCKS_PORT XRAY_EXTRA_OUTBOUNDS XRAY_EXTRA_RULES \
+    XRAY_DIRECT_SEND_THROUGH
   backup_xray_config
   render_template_validated "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
     "$XRAY_CONFIG" 644 /usr/local/bin/xray run -test -config
@@ -376,6 +408,7 @@ FOREIGN readiness
   awg0:        ${FOREIGN_TUNNEL_IP}/${TUNNEL_PREFIX}, UDP/${AWG_PORT} (RU peer: ${ru_peer})
   xray socks:  ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT} (tunnel only)
   google ipv6: $( [[ $GOOGLE_IPV6_EGRESS == 1 ]] && echo "on${HE_SERVER_IPV4:+ (HE tunnel)}" || echo off )
+  xray egress: ${FOREIGN_EGRESS_IPV4:-system default}
   handoff:     /root/belka-foreign-handoff.env
 
 EOF
@@ -437,6 +470,7 @@ main() {
 
   validate_tunnel_net
   validate_google_ipv6
+  validate_foreign_egress_ipv4
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Xray, write $AWG_DIR/awg0.conf,"
@@ -446,6 +480,9 @@ main() {
     fi
     if [[ $GOOGLE_IPV6_EGRESS == 1 ]]; then
       log INFO "dry-run: would route geosite:google over IPv6 (outbound google-v6, ForceIPv6)"
+    fi
+    if [[ -n ${FOREIGN_EGRESS_IPV4:-} ]]; then
+      log INFO "dry-run: would set sendThrough ${FOREIGN_EGRESS_IPV4} on the direct outbound"
     fi
     exit 0
   fi

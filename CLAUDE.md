@@ -96,6 +96,15 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   SOCKS5 on `172.16.0.1:1080`, reachable only over the tunnel. **SOCKS, not NAT, is
   intentional**: domains resolve on the foreign side, so YouTube/Google avoid Russian GGC
   addresses and Anthropic/OpenAI see a foreign IP; no `ip_forward`/NAT is needed.
+- `FOREIGN_EGRESS_IPV4` (FOREIGN only, default empty) pins Xray's `direct` freedom
+  outbound to a source address with `sendThrough`; empty leaves the system default. A
+  non-empty value must be an IPv4 assigned to a local interface (the real run dies
+  otherwise; a dry run only warns) and is applied to all direct egress. It is
+  FOREIGN-local and not part of the handoff. `verify.sh` checks the rendered value and
+  the SOCKS egress; `--google-only [--expect-country CC]` probes Google's `x-country`,
+  and `--expect-egress IP` sets the expected RU-side egress address (default
+  `FOREIGN_PUBLIC_IP`). With `GOOGLE_IPV6_EGRESS=1`, Google hosts use `google-v6` and
+  ignore `sendThrough`; YouTube still uses `direct`.
 - RU has three foreign outbounds plus a default, in this order: `FOREIGN-Domains`
   (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Google-IP` (only
   `geoip:google`), `FOREIGN-Telegram-IP` (`geoip:telegram`), then `Direct`. The split

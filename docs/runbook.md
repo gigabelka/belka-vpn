@@ -284,6 +284,62 @@ IPv4. RU и панель Hiddify не меняются.
 Отключение: `GOOGLE_IPV6_EGRESS=0` и повторный запуск установщика. Юнит туннеля и
 правило UFW удаляются.
 
+## Исходящий IPv4 для Google (sendThrough)
+
+Если Google определяет основной IPv4 как `ru`, а провайдер выдал дополнительный
+IPv4, который Google видит иначе, его можно назначить источником для всего прямого
+выхода FOREIGN. Переменная действует на outbound `direct` целиком: Google, YouTube,
+Telegram, OpenAI и остальные сервисы без отдельного правила.
+
+1. Назначьте адрес по инструкции провайдера и убедитесь, что он локальный:
+
+   ```bash
+   ip -4 -o addr show scope global
+   ip route get 1.1.1.1 from <ip>
+   curl -4 -fsS --interface <ip> --max-time 15 -o /dev/null -D - \
+     'https://clientservices.googleapis.com/chrome-variations/seed?osname=win&channel=stable&milestone=140' \
+     | grep -i '^x-country:'
+   ```
+
+   При NAT провайдера укажите локальный адрес, соответствующий нужному публичному
+   выходу. Адрес должен сохраняться после перезагрузки (провайдер, netplan или
+   cloud-init): скрипты его не добавляют. Продолжайте, когда `x-country` перестанет
+   быть `ru`.
+
+2. В `/etc/belka-vpn/foreign.env`:
+
+   ```bash
+   FOREIGN_EGRESS_IPV4=<ip>
+   GOOGLE_IPV6_EGRESS=0
+   ```
+
+3. Из каталога проекта на FOREIGN:
+
+   ```bash
+   bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
+   systemctl is-active xray
+   ```
+
+4. На RU проверьте страну через SOCKS:
+
+   ```bash
+   bash scripts/verify.sh --google-only --expect-country fi
+   ```
+
+   Без `--expect-country` режим печатает страну и падает только на `ru`/пустом ответе.
+   Фактический исходящий адрес проверяется так:
+   `bash scripts/verify.sh --expect-egress <ip>`.
+   Затем проверьте в клиенте Google Search (страна и источник «по интернет-адресу»),
+   Gemini после входа и воспроизведение YouTube.
+
+При `GOOGLE_IPV6_EGRESS=1` Google-хосты уходят через `google-v6` по IPv6 и
+`sendThrough` не используют; YouTube остаётся на `direct`.
+
+Если новый адрес становится основным выходом системы, `sendThrough` не нужен. Если
+он заменяет публичный адрес, на который RU подключается по AmneziaWG, обновите
+`FOREIGN_PUBLIC_IP` в env-файлах и заново обменяйтесь handoff (см. раздел 4).
+Откат: очистите `FOREIGN_EGRESS_IPV4` и повторно запустите установщик.
+
 ## 10. Обновление и ротация
 
 Повторный запуск скриптов идемпотентен. Ключи и обфускация переиспользуются.

@@ -331,7 +331,8 @@ VPN обязательно перезагрузите вкладку: соеди
    `FOREIGN-Google-IP` с `geoip:google` — без него они уходят Direct.
 2. **Страна exit-IP (`x-country: ru`)** — Google считает адрес российским, даже
    когда ipinfo/RIPE показывают другую страну. Смена правил не поможет: нужен
-   другой IP/подсеть/хостер или IPv6-выход (`GOOGLE_IPV6_EGRESS=1`, см. runbook).
+   другой IP/подсеть/хостер, дополнительный исходящий IPv4 (`FOREIGN_EGRESS_IPV4`,
+   см. runbook) или IPv6-выход (`GOOGLE_IPV6_EGRESS=1`).
 3. **Страна аккаунта = Россия** — нижний колонтитул Условий
    (`policies.google.com/u/0/terms`) или Play → Country and profiles. Помогает
    только Country Association Form (дни–недели) или новый аккаунт, созданный через

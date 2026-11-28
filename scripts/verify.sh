@@ -13,16 +13,37 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 . "$SCRIPT_DIR/lib.sh"
 
 TARGET_ROLE=ru
+GOOGLE_ONLY=0
+EXPECT_COUNTRY=""
+EXPECT_EGRESS=""
 while (( $# )); do
   case "$1" in
     --role) TARGET_ROLE=$2; shift 2 ;;
+    --google-only) GOOGLE_ONLY=1; shift ;;
+    --expect-country)
+      EXPECT_COUNTRY=${2:-}
+      [[ -n $EXPECT_COUNTRY ]] || { echo "--expect-country requires a value" >&2; exit 2; }
+      EXPECT_COUNTRY=${EXPECT_COUNTRY,,}
+      shift 2 ;;
+    --expect-egress)
+      EXPECT_EGRESS=${2:-}
+      [[ -n $EXPECT_EGRESS ]] || { echo "--expect-egress requires a value" >&2; exit 2; }
+      shift 2 ;;
     -h|--help)
-      echo "Usage: verify.sh [--role ru|foreign]"
+      echo "Usage: verify.sh [--role ru|foreign] [--expect-egress IP] [--google-only [--expect-country CC]]"
       exit 0
       ;;
     *) echo "unknown argument: $1" >&2; exit 1 ;;
   esac
 done
+if [[ -n $EXPECT_COUNTRY && $GOOGLE_ONLY != 1 ]]; then
+  echo "--expect-country requires --google-only" >&2
+  exit 2
+fi
+if [[ -n $EXPECT_COUNTRY && ! $EXPECT_COUNTRY =~ ^[a-z]{2}$ ]]; then
+  echo "--expect-country must be a two-letter country code" >&2
+  exit 2
+fi
 
 belka_init verify
 need_root
@@ -44,10 +65,40 @@ if [[ $TARGET_ROLE == ru ]]; then
   fi
 fi
 
+EXPECT_EGRESS=${EXPECT_EGRESS:-${FOREIGN_PUBLIC_IP:-}}
+if [[ -n $EXPECT_EGRESS ]] && ! ipv4_to_int "$EXPECT_EGRESS" >/dev/null 2>&1; then
+  die "--expect-egress is not a valid IPv4 address: $EXPECT_EGRESS"
+fi
+
 PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); log PASS "$*"; }
 bad() { FAIL=$((FAIL + 1)); log FAIL "$*"; }
+
+# Probes Google's own geo database through the FOREIGN SOCKS, which also
+# exercises Xray's direct outbound and its sendThrough source address.
+google_only_check() {
+  local country
+  country=$(google_country --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}")
+  case "$country" in
+    "") bad "could not read Google's country for the FOREIGN exit (x-country)" ;;
+    ru) bad "Google geolocates the FOREIGN exit as RU" ;;
+    *)
+      if [[ -n $EXPECT_COUNTRY && $country != "$EXPECT_COUNTRY" ]]; then
+        bad "Google sees the FOREIGN exit as ${country}, expected ${EXPECT_COUNTRY}"
+      else
+        ok "Google sees the FOREIGN exit as ${country}"
+      fi
+      ;;
+  esac
+}
+
+if (( GOOGLE_ONLY )); then
+  google_only_check
+  log INFO "result: PASS=${PASS} FAIL=${FAIL}"
+  (( FAIL == 0 )) || exit 1
+  exit 0
+fi
 
 check_awg() {
   if systemctl is-active -q awg-quick@awg0; then
@@ -409,6 +460,32 @@ check_foreign() {
   else
     ok "SOCKS is not exposed publicly"
   fi
+  if [[ -n ${FOREIGN_EGRESS_IPV4:-} ]]; then
+    local xcfg=/usr/local/etc/xray/config.json got egress_ip
+    if [[ ! -r $xcfg ]]; then
+      bad "Xray config not found: $xcfg"
+    elif ! command -v jq >/dev/null 2>&1; then
+      bad "jq not found; cannot verify direct sendThrough"
+    else
+      got=$(jq -r '.outbounds[]? | select(.tag == "direct") | .sendThrough // empty' \
+        "$xcfg" 2>/dev/null || true)
+      if [[ $got == "$FOREIGN_EGRESS_IPV4" ]]; then
+        ok "Xray direct outbound sends through ${FOREIGN_EGRESS_IPV4}"
+      elif [[ -z $got ]]; then
+        bad "Xray direct outbound has no sendThrough (expected ${FOREIGN_EGRESS_IPV4}); rerun install-foreign.sh"
+      else
+        bad "Xray direct sendThrough is ${got}, expected ${FOREIGN_EGRESS_IPV4} (rerun install-foreign.sh)"
+      fi
+    fi
+    egress_ip=$(curl -4 -fsS --max-time 15 \
+      --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+      https://api.ipify.org 2>/dev/null || true)
+    if [[ $egress_ip == "$FOREIGN_EGRESS_IPV4" ]]; then
+      ok "SOCKS egress uses ${FOREIGN_EGRESS_IPV4}"
+    elif [[ -n $egress_ip ]]; then
+      warn "SOCKS egress is ${egress_ip}, expected ${FOREIGN_EGRESS_IPV4} (NAT or sendThrough not applied?)"
+    fi
+  fi
   if grep -q "Status: active" <<< "$(ufw status 2>/dev/null)"; then
     ok "ufw is active"
   else
@@ -468,10 +545,10 @@ check_ru() {
   local egress code
   egress=$(curl -4 -fsS --max-time 15 --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
     https://api.ipify.org 2>/dev/null || true)
-  if [[ $egress == "${FOREIGN_PUBLIC_IP}" ]]; then
+  if [[ $egress == "$EXPECT_EGRESS" ]]; then
     ok "egress via FOREIGN is ${egress}"
   elif [[ -n $egress ]]; then
-    warn "egress via FOREIGN is ${egress}, expected ${FOREIGN_PUBLIC_IP} (NAT?)"
+    warn "egress via FOREIGN is ${egress}, expected ${EXPECT_EGRESS:-unknown} (secondary egress or NAT? use --expect-egress)"
   else
     bad "SOCKS egress check failed"
   fi

@@ -43,6 +43,8 @@ AWG_ENABLE_S3S4=${AWG_ENABLE_S3S4:-0}
 GOOGLE_IPV6_EGRESS=${GOOGLE_IPV6_EGRESS:-0}
 HE_SERVER_IPV4=${HE_SERVER_IPV4:-}
 HE_CLIENT_IPV6=${HE_CLIENT_IPV6:-}
+# FOREIGN only: optional source IPv4 for all direct egress (Xray sendThrough).
+FOREIGN_EGRESS_IPV4=${FOREIGN_EGRESS_IPV4:-}
 
 usage() {
   cat <<'EOF'
@@ -245,6 +247,15 @@ ask_port SSH_PORT "SSH port" "$SSH_PORT"
 ask_value AWG_MTU "AmneziaWG MTU" "$AWG_MTU"
 ask_value REALITY_SNI "Reality SNI candidate" "$REALITY_SNI"
 
+if [[ $ROLE != ru && -n $FOREIGN_EGRESS_IPV4 ]]; then
+  is_ipv4 "$FOREIGN_EGRESS_IPV4" \
+    || die "FOREIGN_EGRESS_IPV4 is not a valid IPv4 address: $FOREIGN_EGRESS_IPV4"
+  [[ $FOREIGN_EGRESS_IPV4 != 0.0.0.0 ]] \
+    || die "FOREIGN_EGRESS_IPV4 must not be 0.0.0.0"
+  [[ $FOREIGN_EGRESS_IPV4 != "$FOREIGN_TUNNEL_IP" && $FOREIGN_EGRESS_IPV4 != "$RU_TUNNEL_IP" ]] \
+    || die "FOREIGN_EGRESS_IPV4 must not be a tunnel IP: $FOREIGN_EGRESS_IPV4"
+fi
+
 if [[ -z $OUT_DIR ]]; then
   if (( EUID == 0 )); then
     OUT_DIR=/etc/belka-vpn
@@ -313,6 +324,10 @@ ENABLE_UFW=${FOREIGN_ENABLE_UFW}
 ENABLE_FAIL2BAN=${ENABLE_FAIL2BAN}
 AWG_ENABLE_S3S4=${AWG_ENABLE_S3S4}
 HARDEN_SSH=${HARDEN_SSH}
+
+# Optional source IPv4 for all direct FOREIGN egress (Xray sendThrough).
+# Empty lets the system choose; it must be assigned to a local interface.
+FOREIGN_EGRESS_IPV4=${FOREIGN_EGRESS_IPV4}
 
 # Google domains over IPv6 when Google geolocates the IPv4 exit as RU.
 GOOGLE_IPV6_EGRESS=${GOOGLE_IPV6_EGRESS}
