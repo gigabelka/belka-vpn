@@ -92,7 +92,7 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
 - `AllowedIPs` are `/32` on each side and the default route is never taken. FOREIGN runs
   SOCKS5 on `172.16.0.1:1080`, reachable only over the tunnel. **SOCKS, not NAT, is
   intentional**: domains resolve on the foreign side, so YouTube/Google avoid Russian GGC
-  addresses and Anthropic sees a foreign IP; no `ip_forward`/NAT is needed.
+  addresses and Anthropic/OpenAI see a foreign IP; no `ip_forward`/NAT is needed.
 - RU has three foreign outbounds plus a default, in this order: `FOREIGN-Domains`
   (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Google-IP` (only
   `geoip:google`), `FOREIGN-Telegram-IP` (`geoip:telegram`), then `Direct`. The split
@@ -113,6 +113,13 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   without it the forum hangs unstyled) and announce host `t-ru.org`, `rutor.info` with
   mirrors and `dler.cc` (serves `.torrent`), and `instagram.com` with its CDN
   (`cdninstagram.com`, `fbcdn.net`). `verify.sh` checks the three main hosts.
+- OpenAI/ChatGPT/Codex hosts are listed explicitly in
+  `config/rules/foreign-domains.txt`: `openai.com` (API, `api.openai.com`,
+  `auth.openai.com`), `chatgpt.com` (web and `backend-api`), `oaistatic.com` /
+  `oaiusercontent.com` (assets/files), `chatgpt.livekit.cloud` (voice) and
+  `sora.com`; `geosite:openai` is a fallback because geo files can lag.
+  `verify.sh` checks `openai.com` and `chatgpt.com` separately and warns on
+  geosite-only or partial coverage.
 - Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
   rewriting (`routeOnly=false`, sniffing `http/tls/quic`) only work there.
 - Handoff exchange is circular and public-only: the first run of each role emits
@@ -129,8 +136,8 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   tunnel; it then writes `/root/belka-ru-manual-checklist.txt`.
 - `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer, SOCKS
   binding (must not listen on `0.0.0.0`), egress IP vs `FOREIGN_PUBLIC_IP` (a mismatch is
-  only a warning), YouTube `generate_204` returns 204, `api.anthropic.com` must not
-  return 403, Hiddify services running.
+  only a warning), YouTube `generate_204` returns 204, `api.anthropic.com` and
+  `api.openai.com` must not return 403, Hiddify services running.
 - `config/` — `.tpl` files rendered with `envsubst`; only exported variables are
   substituted, and **unset variables silently become empty**. `config/rules/*` are
   written to `/root/belka-foreign-{domains,geosites,telegram-ip}.txt` on RU with comments
@@ -203,7 +210,8 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   `HE_SERVER_IPV4`/`HE_CLIENT_IPV6`); YouTube stays on IPv4. Off by default, and the
   rendered Xray config is then unchanged.
 - Hiddify blocks QUIC/443 server-side, so YouTube/Google fall back to TCP. Claude Code
-  does not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may bypass TUN.
+  and Codex CLI do not support SOCKS; desktop clients need TUN mode, and WSL2/Docker may
+  bypass TUN.
 - Hiddify app **Strict Route** blocks DNS (port 53) to resolvers outside the tunnel,
   including a corporate NRPT server reached over ZeroTier. The site stays reachable by IP
   (`curl --resolve` works) while names stop resolving; check

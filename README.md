@@ -3,13 +3,13 @@
 Двухсерверный VPN с разделением трафика:
 
 - клиенты (Hiddify app) подключаются **только к российскому серверу** по VLESS + Reality;
-- российский сервер отправляет YouTube, Telegram, сервисы Google, Claude/Anthropic, прочий AI, а также заблокированные в РФ рутрекер/рутор и Instagram через **зарубежный сервер**;
+- российский сервер отправляет YouTube, Telegram, сервисы Google, Claude/Anthropic, OpenAI/ChatGPT/Codex, прочий AI, а также заблокированные в РФ рутрекер/рутор и Instagram через **зарубежный сервер**;
 - весь остальной трафик выходит напрямую из России;
 - между серверами — **AmneziaWG** (UDP), на зарубежной стороне — SOCKS5 только на адресе тоннеля.
 
 ```text
 Hiddify app ──VLESS+Reality/443──► RU <RU_PUBLIC_IP> (Hiddify Manager)
-                                     ├─ 1. FOREIGN-Domains: домены + geosite (youtube/google/telegram/anthropic/openai, rutracker/rutor/instagram)
+                                     ├─ 1. FOREIGN-Domains: домены + geosite (youtube/google/telegram, anthropic, openai, rutracker/rutor/instagram)
                                      │        └─ Socks ──► 172.16.0.1:1080 (FOREIGN Xray)
                                      ├─ 2. FOREIGN-Google-IP: geoip:google (Google без домена)
                                      │        └─ Socks ──► 172.16.0.1:1080
@@ -20,7 +20,7 @@ Hiddify app ──VLESS+Reality/443──► RU <RU_PUBLIC_IP> (Hiddify Manager)
 RU 172.16.0.2 ══════ AmneziaWG ══════ 172.16.0.1 FOREIGN <FOREIGN_PUBLIC_IP> ──► интернет
 ```
 
-Почему SOCKS, а не NAT на зарубежном сервере: домены выбранных сервисов резолвятся уже там. YouTube/Google не получают российские GGC-адреса, а Anthropic не видит российский IP. `ip_forward` и NAT не нужны ни на одном сервере, на RU пересылка выключена явно.
+Почему SOCKS, а не NAT на зарубежном сервере: домены выбранных сервисов резолвятся уже там. YouTube/Google не получают российские GGC-адреса, а Anthropic и OpenAI не видят российский IP. `ip_forward` и NAT не нужны ни на одном сервере, на RU пересылка выключена явно.
 
 > **В репозитории нет адресов серверов.** Российский и зарубежный IP пользователь задаёт через `scripts/configure.sh` или `/etc/belka-vpn/*.env`. Скрипты не имеют дефолтных публичных адресов и падают с понятной ошибкой, если IP не задан. Единственный файл с публичными диапазонами — `config/client/hiddify-allowedips.txt`: это список маршрутизации клиента, а не идентификатор сервера (см. «Адреса в обход VPN»).
 
@@ -211,7 +211,7 @@ hiddify admin   # ссылка — секрет, не копируйте в ча
 - IPv6 — **Disabled**;
 - DNS — remote `1.1.1.1` через прокси;
 - Resolve Destination — **OFF**;
-- на десктопе — **TUN/VPN mode** (Claude Code не поддерживает SOCKS);
+- на десктопе — **TUN/VPN mode** (Claude Code и Codex CLI не поддерживают SOCKS);
 - два правила маршрутизации из `config/client/hiddify-allowedips.txt`: 12 исключений →
   **Напрямую**, все 199 адресов → **Proxy** (см. «Адреса в обход VPN»).
 
@@ -247,7 +247,8 @@ bash scripts/verify.sh --role foreign
 - rutracker.org (со стилями и картинками с `static.rutracker.cc`), rutor.info и instagram.com открываются через зарубежный сервер (медиа Instagram грузится);
 - `gemini.google.com` не показывает «недоступно в вашей стране»;
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
-- в клиенте `api.ipify.org` → российский IP (`ipinfo.io` может уйти через FOREIGN, если его адрес попадает в `geoip:google`), а YouTube/Google/Claude и Telegram (сообщения и медиа) идут через зарубежный сервер.
+- `api.openai.com/v1/models` → 401 без ключа, **не** 403;
+- в клиенте `api.ipify.org` → российский IP (`ipinfo.io` может уйти через FOREIGN, если его адрес попадает в `geoip:google`), а YouTube/Google/Claude/ChatGPT и Telegram (сообщения и медиа) идут через зарубежный сервер.
 
 ## Обновление
 
@@ -294,6 +295,6 @@ Hiddify Manager удаляется отдельно (официальный unin
 - Без домена подписка по HTTPS может отклоняться Hiddify app из-за self-signed — используйте прямую `vless://`-ссылку.
 - Hiddify Manager блокирует QUIC/443 на серверной стороне: YouTube/Google пойдут по TCP (SNI-маршрутизация сохраняется). HC-конфиги на RU отключены, поэтому Telegram по IP идёт через `geoip:telegram` → FOREIGN, включая медиа. UDP Telegram на других портах может работать; звонки проверяйте отдельно.
 - Hiddify Manager отправляет протокол BitTorrent в blackhole (правило в сгенерированном `xray.json`): сайты и анонсы трекеров (HTTP к `t-ru.org`) идут через FOREIGN, но P2P-обмен торрент-клиента через VPN не работает.
-- Claude Code не поддерживает SOCKS: на компьютере нужен TUN-режим Hiddify; WSL2/Docker могут обходить TUN.
+- Claude Code и Codex CLI не поддерживают SOCKS: на компьютере нужен TUN-режим Hiddify; WSL2/Docker могут обходить TUN.
 
 Диагностика — `docs/troubleshooting.md`.

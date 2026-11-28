@@ -55,6 +55,11 @@ Reality SNI candidate: ${REALITY_SNI}
       Signed-in Gemini needs one exit IP for all Google hosts: a host left on
       Direct makes Google see mixed IPs and can show "not supported in your
       country" even when incognito works.
+      OpenAI/ChatGPT/Codex: openai.com (API/platform), chatgpt.com (web and
+      backend-api), oaistatic.com/oaiusercontent.com (assets/files),
+      chatgpt.livekit.cloud (ChatGPT voice) and sora.com are in the /root list;
+      geosite:openai is a fallback only (geo files can lag). Codex CLI does
+      not support SOCKS: use TUN on desktop.
       Domestic sites of Iran/Russia: OFF
       Rule-sets (hiddify-core): empty (Common Proxy Core = Xray)
       *** Do NOT add geoip:google here (it has its own outbound B). ***
@@ -105,10 +110,10 @@ Reality SNI candidate: ${REALITY_SNI}
    - DNS: remote 1.1.1.1 via proxy
    - Resolve Destination: OFF
    - Browser: ECH and DoH disabled (otherwise Xray cannot see SNI)
-   - On desktop use TUN/VPN mode (Claude Code does not support SOCKS)
+   - On desktop use TUN/VPN mode (Claude Code and Codex CLI do not support SOCKS)
 
 9) Tests
-   - youtube.com, google.com, claude.ai -> through FOREIGN
+   - youtube.com, google.com, claude.ai, chatgpt.com -> through FOREIGN
    - rutracker.org (with styles), rutor.info, instagram.com -> through FOREIGN (media loads;
      torrent announces reach the tracker)
    - rutracker.org must open 10/10 times; "every other request" means a VLESS inbound
@@ -124,4 +129,5 @@ Reality SNI candidate: ${REALITY_SNI}
        Account country: footer of https://policies.google.com/u/0/terms
    - Russian sites -> Direct (RU IP)
    - api.anthropic.com returns 400/401/404/405, not 403 region
+   - api.openai.com/v1/models returns 401 without a key, not 403 region
    - Telegram messages work (calls may use UDP; verify separately)

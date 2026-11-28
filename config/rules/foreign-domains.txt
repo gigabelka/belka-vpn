@@ -11,13 +11,21 @@ platform.claude.com
 sso.claude.com
 mcp-proxy.anthropic.com
 downloads.claude.ai
-accounts.google.com
 
-# Other AI services
+# OpenAI / ChatGPT / Codex
+# openai.com covers api.openai.com (API and Codex CLI) and auth.openai.com;
+# chatgpt.com covers the web app, auth and backend-api; oaistatic.com and
+# oaiusercontent.com serve web assets/files; chatgpt.livekit.cloud carries
+# ChatGPT voice; sora.com is Sora. geosite:openai is a fallback only: geo
+# files can lag, and explicit hosts are the reliable path.
 openai.com
 chatgpt.com
 oaistatic.com
 oaiusercontent.com
+chatgpt.livekit.cloud
+sora.com
+
+# Other AI services (separate vendors; openai.com does not cover them)
 perplexity.ai
 x.ai
 
@@ -36,6 +44,9 @@ googlesource.com
 # Google AI / Gemini and sign-in
 # google.com/googleapis.com already cover the Google-hosted names below; they are
 # listed explicitly in case Hiddify stores Sites as exact matches.
+# accounts.google.com is Google SSO (also used by Claude/OpenAI "Sign in with
+# Google"); google.com covers it when suffix matching is used.
+accounts.google.com
 ai.google
 labs.google
 deepmind.google

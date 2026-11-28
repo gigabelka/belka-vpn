@@ -26,7 +26,7 @@
 - **DNS** — remote `1.1.1.1` через прокси (Настройки → DNS);
 - **Resolve Destination / Определить адрес назначения** — выключен;
 - на десктопе — **TUN/VPN mode**: Настройки → Входящие → режим службы `VPN`.
-  Claude Code не поддерживает SOCKS; WSL2/Docker могут обходить TUN;
+  Claude Code и Codex CLI не поддерживают SOCKS; WSL2/Docker могут обходить TUN;
 - **Правила маршрутизации** — два правила из `config/client/hiddify-allowedips.txt`:
   12 исключений → **Напрямую**, все 199 адресов → **Proxy** (см. §3–§4; без GUI — §8).
 

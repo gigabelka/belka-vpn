@@ -209,11 +209,11 @@ bash scripts/verify.sh --role foreign
 1. `https://api.ipify.org` (или `https://ifconfig.me/ip`) → российский IP. `ipinfo.io`
    может уйти через FOREIGN, если его адрес попадает в `geoip:google`.
 2. Временно добавить `ipinfo.io` в `Sites` outbound FOREIGN-Domains → зарубежный IP; убрать.
-3. YouTube/Google/Claude/Telegram/Gemini работают (включая медиа/видео Telegram);
+3. YouTube/Google/Claude/OpenAI/ChatGPT/Telegram/Gemini работают (включая медиа/видео Telegram);
    российские сайты идут Direct.
-4. `api.anthropic.com` — не 403.
+4. `api.anthropic.com` — не 403; `api.openai.com/v1/models` — 401 без ключа, не 403.
 5. DNS/IPv6 leak-тесты.
-6. Claude Code в TUN-режиме.
+6. Claude Code и Codex CLI в TUN-режиме.
 
 ## Текущее состояние: стабилизация Telegram (2026-11-24)
 

@@ -30,7 +30,7 @@ AmneziaWG:   UDP/443 (настраивается)
 
 1. Клиент устанавливает VLESS+Reality-соединение с российским сервером.
 2. Xray на RU получает SNI (sniffing), применяет правила Outbounds сверху вниз.
-3. Совпало с `FOREIGN-Domains`, `FOREIGN-Google-IP` или `FOREIGN-Telegram-IP` → соединение уходит в SOCKS5-outbound на `172.16.0.1:1080`.
+3. Совпало с `FOREIGN-Domains` (Google, YouTube, Claude/Anthropic, OpenAI/ChatGPT, Telegram-домены, трекеры, Instagram), `FOREIGN-Google-IP` или `FOREIGN-Telegram-IP` → соединение уходит в SOCKS5-outbound на `172.16.0.1:1080`.
 4. SOCKS-трафик идёт внутри `awg0` (AmneziaWG) до зарубежного сервера.
 5. Xray на FOREIGN принимает SOCKS, резолвит домен через зарубежные DNS (`1.1.1.1`, `8.8.8.8`) и открывает соединение в интернет.
 6. Не совпало ни с одним FOREIGN-правилом → `Direct`, выход из России.
@@ -41,7 +41,7 @@ Hiddify Manager (v14.x, проверено на 14.2.0) собирает Xray-к
 
 Поэтому:
 
-- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`. Сюда же входят заблокированные в РФ торрент-трекеры (`rutracker.org` со статикой на `rutracker.cc`, `rutor.info` с announce-хостами `t-ru.org` и вспомогательными `dler.cc`) и Instagram с CDN (`cdninstagram.com`, `fbcdn.net`): для них нет geosite-тегов, поэтому хосты перечислены явно.
+- **FOREIGN-Domains** — только домены и `geosite` (google/youtube/telegram/anthropic/openai/ai). Без `geoip:google`. OpenAI/ChatGPT/Codex идут по явным хостам: `openai.com` (API, `api.openai.com`, `auth.openai.com`), `chatgpt.com` (веб и `backend-api`), `oaistatic.com`/`oaiusercontent.com` (статика и файлы), `chatgpt.livekit.cloud` (голос ChatGPT), `sora.com` (Sora); `geosite:openai` — резерв, потому что geo-файлы могут отставать. Сюда же входят заблокированные в РФ торрент-трекеры (`rutracker.org` со статикой на `rutracker.cc`, `rutor.info` с announce-хостами `t-ru.org` и вспомогательными `dler.cc`) и Instagram с CDN (`cdninstagram.com`, `fbcdn.net`): для них нет geosite-тегов, поэтому хосты перечислены явно.
 - **FOREIGN-Google-IP** — только `geoip:google`, ниже FOREIGN-Domains. Ловит соединения к адресам Google без домена (приложения, которые ходят по IP, хосты вне доменных списков), чтобы залогиненная сессия Google не видела российский IP рядом с зарубежным.
 - **FOREIGN-Telegram-IP** — только `geoip:telegram`, ниже FOREIGN-Domains. Telegram-клиенты ходят на hardcoded IP без SNI.
 - **Direct** — последний и default.
@@ -112,7 +112,7 @@ IP всегда попадает в `geoip:telegram` → FOREIGN. Если HC-к
 - RU: Xray резолвит только то, что уходит в Direct; для FOREIGN-правил домен передаётся на зарубежный сервер.
 - FOREIGN: `freedom` с `domainStrategy: UseIPv4`, DNS `1.1.1.1`/`8.8.8.8` — домен резолвится на зарубежной стороне.
 
-Так YouTube/Google не получают российские GGC-адреса, а `api.anthropic.com` видит зарубежный выход.
+Так YouTube/Google не получают российские GGC-адреса, а `api.anthropic.com` и `api.openai.com` видят зарубежный выход.
 
 ## IPv6-выход для Google (опция)
 
@@ -172,4 +172,4 @@ sniffing там не нужен.
 - Встроенный outbound `Block` стоит выше Socks. Он безвреден, пока у него нет списков и выключен «Domestic sites».
 - UDP между РФ и зарубежным сервером может резаться DPI/хостером. AmneziaWG маскирует handshake, но UDP-поток может троттлиться; при блокировке меняйте порт/параметры. На практике туннель упирался в шейпинг UDP по пути примерно на 150 Мбит/с на поток без потерь, тогда как TCP между теми же серверами шёл в 3–5 раз быстрее. Настройками это не лечится; как отличить такой потолок от проблем серверов — `docs/troubleshooting.md`.
 - `write_sysctl` (`scripts/lib.sh`) поднимает потолки буферов сокетов до 64 МБ (`rmem_max`/`wmem_max`, `tcp_rmem`/`tcp_wmem`) и включает `tcp_mtu_probing`: при MTU туннеля 1240 TCP сам находит рабочий размер пакета, если PMTU-сообщения теряются. MTU снижен с 1280 до 1240 после потерь и всплесков RTT на крупных пакетах. На RU те же буферы выставляет Hiddify. Пропускную способность сверх потолка пути это не поднимает, но убирает ограничение по умолчанию в 208 КБ на явный `SO_RCVBUF`/`SO_SNDBUF`.
-- Claude Code не поддерживает SOCKS; на десктопе нужен TUN. WSL2/Docker могут обходить TUN — проверяйте отдельно.
+- Claude Code и Codex CLI не поддерживают SOCKS; на десктопе нужен TUN. WSL2/Docker могут обходить TUN — проверяйте отдельно.

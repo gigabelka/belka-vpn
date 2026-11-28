@@ -95,6 +95,7 @@ check_hiddify_routing() {
   # older layouts use settings.servers[0]. Support both.
   local socks_count socks_tags tags_json tag domain_count google_count google_full_count telegram_count
   local ai_count domain_idx telegram_idx rutracker_cc_count rutracker_wiki_count no_sniff_tags
+  local openai_count chatgpt_count openai_geo_count
   socks_count=$(jq --arg ip "$FOREIGN_TUNNEL_IP" --arg port "$SOCKS_PORT" '
     [.outbounds[]?
      | select(.protocol == "socks")
@@ -179,6 +180,33 @@ check_hiddify_routing() {
     ok "Hiddify routes Google AI (.google / ai.studio) hosts to a SOCKS outbound"
   else
     warn "Hiddify does not route Google AI hosts (ai.studio, gemini.google, generativeai.google); signed-in Gemini may leave via Direct"
+  fi
+
+  # OpenAI/ChatGPT/Codex are listed explicitly. Check the two base hosts
+  # separately: only chatgpt.com leaves Codex/API on Direct and vice versa.
+  # geosite:openai and the category-ai tags can cover both, but geo files lag.
+  openai_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "openai.com" or . == "domain:openai.com")] | length' "$cfg")
+  chatgpt_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "chatgpt.com" or . == "domain:chatgpt.com")] | length' "$cfg")
+  openai_geo_count=$(jq --argjson tags "$tags_json" '
+    [.routing.rules[]?
+     | select(.outboundTag as $t | ($tags | index($t // "")) != null)
+     | (.domain // [])[]
+     | select(. == "geosite:openai" or . == "geosite:category-ai-chat-!cn"
+              or . == "geosite:category-ai-!cn")] | length' "$cfg")
+  if (( openai_count > 0 && chatgpt_count > 0 )); then
+    ok "Hiddify routes openai.com/chatgpt.com (OpenAI/ChatGPT/Codex) to a SOCKS outbound"
+  elif (( openai_count > 0 || chatgpt_count > 0 || openai_geo_count > 0 )); then
+    warn "Hiddify routes only part of OpenAI/ChatGPT (or geosite only); paste the full /root/belka-foreign-domains.txt"
+  else
+    bad "Hiddify routes no openai.com/chatgpt.com (ChatGPT/Codex leave via Direct); full:openai.com does not cover api.openai.com"
   fi
 
   # Rutracker/Rutor/Instagram are listed explicitly (no geosite tag is assumed),
@@ -453,6 +481,19 @@ check_ru() {
     400|401|404|405) ok "Anthropic via FOREIGN returns ${code} (not region-blocked)" ;;
     403) bad "Anthropic returns 403: the exit is still blocked or not FOREIGN" ;;
     *) warn "Anthropic returned ${code:-no response}; check manually" ;;
+  esac
+
+  # OpenAI geofences before auth: unauthenticated /v1/models returns 401 from a
+  # supported country and 403 (Country, region, ... not supported) from a
+  # blocked one. Do not probe chatgpt.com: Cloudflare returns 403/challenge to
+  # curl regardless of region and would look like a region block.
+  code=$(curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+    --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+    https://api.openai.com/v1/models 2>/dev/null || true)
+  case "$code" in
+    401) ok "OpenAI API via FOREIGN returns 401 (not region-blocked)" ;;
+    403) bad "OpenAI API returns 403: the exit is still blocked or not FOREIGN" ;;
+    *) warn "OpenAI API returned ${code:-no response}; check manually" ;;
   esac
 
   check_gemini

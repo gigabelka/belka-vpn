@@ -272,6 +272,34 @@ IP-правило бесполезно — адреса Cloudflare общие д
 - Claude Code на десктопе должен работать в TUN-режиме: SOCKS он не
   поддерживает. В WSL2/Docker TUN может не перехватываться.
 
+## OpenAI/ChatGPT/Codex отдаёт 403
+
+403 с текстом про страну/регион (`Country, region, or territory not supported`)
+означает, что выход всё ещё российский или OpenAI считает его таким по своей
+геобазе.
+
+- проверьте, что `api.openai.com` и `chatgpt.com` попадают в `FOREIGN-Domains`;
+- в Sites должен быть блок OpenAI: `openai.com`, `chatgpt.com`, `oaistatic.com`,
+  `oaiusercontent.com`, `chatgpt.livekit.cloud`, `sora.com`; `geosite:openai` —
+  только резерв, потому что geo-файлы могут отставать;
+- проверка с РФ через SOCKS:
+
+  ```bash
+  curl -4 -sS -o /dev/null -w '%{http_code}\n' \
+    --socks5-hostname 172.16.0.1:1080 https://api.openai.com/v1/models
+  ```
+
+  `401` без ключа — маршрут рабочий; `403` — регион/выход;
+- `403` от `chatgpt.com` сам по себе ничего не доказывает: Cloudflare может
+  отдавать challenge на `curl` (`cf-mitigated: challenge`) независимо от региона.
+  Для проверки маршрута используйте `api.openai.com`;
+- Codex CLI не поддерживает SOCKS: на десктопе включите TUN-режим Hiddify.
+  Claude Code — только TUN. В WSL2/Docker TUN может не перехватываться;
+- голос ChatGPT идёт через `chatgpt.livekit.cloud` (WebRTC/TURN на 443); звонки
+  проверяйте отдельно — UDP может резаться, TCP-фолбэк зависит от клиента;
+- `401` без ключа — это норма, а не ошибка. Если API-ключ не работает, проверьте
+  страну аккаунта и платёжного профиля: маршрутизация их не меняет.
+
 ## Gemini: «недоступен в вашей стране»
 
 Симптом: `https://gemini.google.com/?hl=ru` показывает «Gemini пока не
@@ -436,7 +464,7 @@ xray run -test -c /opt/hiddify-manager/generated/xray.json
 
 Частые причины:
 
-- **Неизвестный geosite-тег** (`geosite:anthropic`, `category-ai-!cn` могут
+- **Неизвестный geosite-тег** (`geosite:anthropic`, `geosite:openai`, `category-ai-!cn` могут
   отсутствовать в вашей версии). Уберите тег, оставьте домены.
 - **Порядок outbounds**: WARP/Block выше Socks перехватывают трафик, если у них
   есть списки. Встроенный Block стоит первым — это нормально. WARP
