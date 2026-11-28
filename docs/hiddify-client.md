@@ -93,7 +93,7 @@ sing-box/WireGuard, часть мобильных клиентов), те же 1
 
 ```powershell
 # обычный трафик идёт с российского IP
-curl.exe -s https://ipinfo.io/ip
+curl.exe -s https://api.ipify.org
 
 # утечки IPv6/DNS проверяйте на https://test-ipv6.com и https://dnsleaktest.com
 

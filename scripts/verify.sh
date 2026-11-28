@@ -44,6 +44,10 @@ if [[ -n $EXPECT_COUNTRY && ! $EXPECT_COUNTRY =~ ^[a-z]{2}$ ]]; then
   echo "--expect-country must be a two-letter country code" >&2
   exit 2
 fi
+if (( GOOGLE_ONLY )) && [[ -n $EXPECT_EGRESS ]]; then
+  echo "--expect-egress requires the full verification run" >&2
+  exit 2
+fi
 
 belka_init verify
 need_root
@@ -65,15 +69,33 @@ if [[ $TARGET_ROLE == ru ]]; then
   fi
 fi
 
-EXPECT_EGRESS=${EXPECT_EGRESS:-${FOREIGN_PUBLIC_IP:-}}
+STRICT_EGRESS=0
 if [[ -n $EXPECT_EGRESS ]] && ! ipv4_to_int "$EXPECT_EGRESS" >/dev/null 2>&1; then
   die "--expect-egress is not a valid IPv4 address: $EXPECT_EGRESS"
+fi
+if [[ -n $EXPECT_EGRESS ]]; then
+  STRICT_EGRESS=1
+elif [[ $TARGET_ROLE == ru ]]; then
+  EXPECT_EGRESS=${FOREIGN_PUBLIC_IP:-}
 fi
 
 PASS=0
 FAIL=0
 ok() { PASS=$((PASS + 1)); log PASS "$*"; }
 bad() { FAIL=$((FAIL + 1)); log FAIL "$*"; }
+
+check_socks_egress() {
+  local actual
+  if ! actual=$(socks_egress_ipv4); then
+    bad "SOCKS IPv4 egress check failed"
+  elif [[ -z $EXPECT_EGRESS || $actual == "$EXPECT_EGRESS" ]]; then
+    ok "SOCKS IPv4 egress is $actual"
+  elif (( STRICT_EGRESS )); then
+    bad "SOCKS IPv4 egress is $actual, expected $EXPECT_EGRESS"
+  else
+    warn "SOCKS IPv4 egress is $actual, default expectation $EXPECT_EGRESS (secondary egress or NAT? use --expect-egress)"
+  fi
+}
 
 # Probes Google's own geo database through the FOREIGN SOCKS, which also
 # exercises Xray's direct outbound and its sendThrough source address.
@@ -109,7 +131,7 @@ check_awg() {
   fi
 
   local hs age rx
-  hs=$(awg show awg0 latest-handshakes 2>/dev/null | awk 'NR==1{print $2}')
+  hs=$(awg show awg0 latest-handshakes 2>/dev/null | awk 'NR==1{print $2}' || true)
   hs=${hs:-0}
   age=$(( $(date +%s) - hs ))
   if (( hs > 0 && age < 180 )); then
@@ -118,7 +140,7 @@ check_awg() {
     bad "AmneziaWG handshake missing/stale (${age}s)"
   fi
 
-  rx=$(awg show awg0 transfer 2>/dev/null | awk 'NR==1{print $2}')
+  rx=$(awg show awg0 transfer 2>/dev/null | awk 'NR==1{print $2}' || true)
   if (( ${rx:-0} > 0 )); then
     ok "AmneziaWG RX ${rx} bytes"
   else
@@ -267,10 +289,9 @@ check_hiddify_routing() {
   blocked_count=$(jq --argjson tags "$tags_json" '
     [.routing.rules[]?
      | select(.outboundTag as $t | ($tags | index($t // "")) != null)
-     | (.domain // [])[]
-     | select(. == "instagram.com" or . == "domain:instagram.com"
-              or . == "rutracker.org" or . == "domain:rutracker.org"
-              or . == "rutor.info" or . == "domain:rutor.info")] | length' "$cfg")
+     | (.domain // [])[] | sub("^domain:"; "")
+     | select(. == "instagram.com" or . == "rutracker.org" or . == "rutor.info")
+    ] | unique | length' "$cfg")
   if (( blocked_count >= 3 )); then
     ok "Hiddify routes rutracker.org/rutor.info/instagram.com to a SOCKS outbound"
   elif (( blocked_count > 0 )); then
@@ -450,49 +471,65 @@ check_foreign() {
   else
     bad "xray is not active"
   fi
-  if grep -Fq "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" <<< "$(ss -lntp 2>/dev/null)"; then
-    ok "SOCKS listens on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
-  else
-    bad "SOCKS does not listen on ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
-  fi
-  if grep -Eq "0\.0\.0\.0:${SOCKS_PORT}|\[::\]:${SOCKS_PORT}" <<< "$(ss -lntu 2>/dev/null)"; then
-    bad "SOCKS is exposed publicly on port ${SOCKS_PORT}"
-  else
-    ok "SOCKS is not exposed publicly"
-  fi
-  if [[ -n ${FOREIGN_EGRESS_IPV4:-} ]]; then
-    local xcfg=/usr/local/etc/xray/config.json got egress_ip
-    if [[ ! -r $xcfg ]]; then
-      bad "Xray config not found: $xcfg"
-    elif ! command -v jq >/dev/null 2>&1; then
-      bad "jq not found; cannot verify direct sendThrough"
-    else
-      got=$(jq -r '.outbounds[]? | select(.tag == "direct") | .sendThrough // empty' \
-        "$xcfg" 2>/dev/null || true)
-      if [[ $got == "$FOREIGN_EGRESS_IPV4" ]]; then
-        ok "Xray direct outbound sends through ${FOREIGN_EGRESS_IPV4}"
-      elif [[ -z $got ]]; then
-        bad "Xray direct outbound has no sendThrough (expected ${FOREIGN_EGRESS_IPV4}); rerun install-foreign.sh"
-      else
-        bad "Xray direct sendThrough is ${got}, expected ${FOREIGN_EGRESS_IPV4} (rerun install-foreign.sh)"
-      fi
+  local proto sockets endpoint="${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
+  for proto in tcp udp; do
+    local mode=t
+    [[ $proto == tcp ]] || mode=u
+    if ! sockets=$(ss "-Hln$mode" "sport = :$SOCKS_PORT" | awk '{print $(NF-1)}'); then
+      bad "could not read $proto listeners on port $SOCKS_PORT"
+    elif [[ $proto == tcp ]] && ! grep -Fxq "$endpoint" <<< "$sockets"; then
+      bad "SOCKS does not listen on $endpoint ($proto)"
+    elif awk -v endpoint="$endpoint" '
+        NF && $1 != endpoint && $1 !~ /^127\./ && $1 !~ /^\[::1\]:/ { exposed=1 }
+        END { exit !exposed }' <<< "$sockets"; then
+      bad "unexpected non-loopback $proto listener on SOCKS port $SOCKS_PORT"
+    elif [[ $proto == tcp ]]; then
+      ok "SOCKS listens on $endpoint (TCP) and has no external bind"
     fi
-    egress_ip=$(curl -4 -fsS --max-time 15 \
-      --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
-      https://api.ipify.org 2>/dev/null || true)
-    if [[ $egress_ip == "$FOREIGN_EGRESS_IPV4" ]]; then
-      ok "SOCKS egress uses ${FOREIGN_EGRESS_IPV4}"
-    elif [[ -n $egress_ip ]]; then
-      warn "SOCKS egress is ${egress_ip}, expected ${FOREIGN_EGRESS_IPV4} (NAT or sendThrough not applied?)"
-    fi
+  done
+  local xcfg=/usr/local/etc/xray/config.json got
+  if ! got=$(jq -er '.outbounds[]? | select(.tag == "direct") | .sendThrough // ""' \
+      "$xcfg" 2>/dev/null); then
+    bad "could not read direct sendThrough from $xcfg"
+  elif [[ $got != "$FOREIGN_EGRESS_IPV4" ]]; then
+    bad "Xray direct sendThrough is ${got:-unset}, expected ${FOREIGN_EGRESS_IPV4:-unset}; rerun install-foreign.sh"
+  elif [[ -n $FOREIGN_EGRESS_IPV4 ]]; then
+    ok "Xray direct outbound uses local source $FOREIGN_EGRESS_IPV4"
   fi
-  if grep -q "Status: active" <<< "$(ufw status 2>/dev/null)"; then
-    ok "ufw is active"
-  else
-    warn "ufw is not active (check provider firewall)"
-  fi
+  check_socks_egress
+  check_foreign_firewall
   if [[ $GOOGLE_IPV6_EGRESS == 1 ]]; then
     check_google_ipv6
+  fi
+}
+
+check_foreign_firewall() {
+  [[ $ENABLE_UFW == 1 ]] || return 0
+  local status added rule desired drift=0
+  if ! status=$(LC_ALL=C ufw status 2>/dev/null) \
+      || ! grep -Fxq "Status: active" <<< "$status"; then
+    bad "ufw is not active (ENABLE_UFW=1)"
+    return
+  fi
+  if [[ -z ${RU_PUBLIC_IP:-} ]] || ! added=$(LC_ALL=C ufw show added 2>/dev/null); then
+    bad "could not compare configured UFW rules with the FOREIGN env"
+    return
+  fi
+  desired=$(foreign_ufw_rules)
+  while IFS= read -r rule; do
+    if ! ufw_rule_present "$added" "$rule"; then
+      bad "UFW rule is missing: $rule"
+      drift=1
+    fi
+  done <<< "$desired"
+  while IFS= read -r rule; do
+    if ! grep -Fxq "$rule" <<< "$desired"; then
+      bad "obsolete Belka UFW rule: $rule"
+      drift=1
+    fi
+  done < <(foreign_ufw_managed_rules <<< "$added")
+  if (( ! drift )); then
+    ok "ufw is active and expected FOREIGN rules are configured"
   fi
 }
 
@@ -535,6 +572,20 @@ check_ru() {
   check_awg
   check_hiddify_routing
 
+  if systemctl is-active -q hiddify-xray; then
+    ok "hiddify-xray is active"
+  else
+    bad "hiddify-xray is not active"
+  fi
+  if grep -q . <<< "$(ss -Hlnt 'sport = :443' 2>/dev/null)"; then
+    ok "TCP/443 is listening"
+  else
+    bad "TCP/443 is not listening (check the Reality entry point)"
+  fi
+  if [[ ! -d /opt/hiddify-manager ]]; then
+    bad "Hiddify Manager is missing"
+  fi
+
   if timeout 5 bash -c "</dev/tcp/${FOREIGN_TUNNEL_IP}/${SOCKS_PORT}" 2>/dev/null; then
     ok "SOCKS TCP reachable at ${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}"
   else
@@ -542,17 +593,9 @@ check_ru() {
     return
   fi
 
-  local egress code
-  egress=$(curl -4 -fsS --max-time 15 --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
-    https://api.ipify.org 2>/dev/null || true)
-  if [[ $egress == "$EXPECT_EGRESS" ]]; then
-    ok "egress via FOREIGN is ${egress}"
-  elif [[ -n $egress ]]; then
-    warn "egress via FOREIGN is ${egress}, expected ${EXPECT_EGRESS:-unknown} (secondary egress or NAT? use --expect-egress)"
-  else
-    bad "SOCKS egress check failed"
-  fi
+  check_socks_egress
 
+  local code
   code=$(curl -4 -sS -o /dev/null -w '%{http_code}' --max-time 20 \
     --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
     https://www.youtube.com/generate_204 2>/dev/null || true)
@@ -585,24 +628,6 @@ check_ru() {
   esac
 
   check_gemini
-
-  if grep -q . <<< "$(systemctl list-units --type=service --state=running 'hiddify*' --no-legend 2>/dev/null)"; then
-    ok "Hiddify services are running"
-  else
-    bad "Hiddify services are not running"
-  fi
-
-  if grep -q ':443 ' <<< "$(ss -lntp 2>/dev/null)"; then
-    ok "TCP/443 is listening"
-  else
-    warn "TCP/443 is not listening yet (Reality inbound not applied?)"
-  fi
-
-  if [[ -d /opt/hiddify-manager ]]; then
-    ok "Hiddify Manager is installed"
-  else
-    bad "Hiddify Manager is missing"
-  fi
 }
 
 if [[ $TARGET_ROLE == foreign ]]; then

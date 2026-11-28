@@ -20,7 +20,6 @@ RU_PUB_KEY_ARG=""
 UNINSTALL=0
 DRY_RUN=0
 XRAY_CONFIG=/usr/local/etc/xray/config.json
-XRAY_CONFIG_CHANGED=0
 
 usage() {
   cat <<'EOF'
@@ -31,7 +30,7 @@ Options:
   --handoff FILE    RU handoff with RU_PUBLIC_KEY (adds/updates the peer)
   --ru-pub KEY      RU public key (alternative to --handoff)
   --uninstall       Stop and remove FOREIGN components (keeps package and keys)
-  --dry-run         Print the plan and exit
+  --dry-run         Validate inputs and print the plan
   -h, --help        Show this help
 EOF
 }
@@ -137,7 +136,7 @@ validate_google_ipv6() {
   [[ $GOOGLE_IPV6_EGRESS == 0 || $GOOGLE_IPV6_EGRESS == 1 ]] \
     || die "GOOGLE_IPV6_EGRESS must be 0 or 1"
   if [[ -n $HE_SERVER_IPV4 || -n $HE_CLIENT_IPV6 ]]; then
-    [[ $HE_SERVER_IPV4 =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] \
+    handoff_valid_ipv4 "$HE_SERVER_IPV4" \
       || die "HE_SERVER_IPV4 must be the tunnel server IPv4 (tunnelbroker.net: Server IPv4 Address)"
     [[ $HE_CLIENT_IPV6 =~ ^[0-9A-Fa-f:]+/[0-9]{1,3}$ ]] \
       || die "HE_CLIENT_IPV6 must be an IPv6 address with prefix (tunnelbroker.net: Client IPv6 Address)"
@@ -158,6 +157,7 @@ validate_foreign_egress_ipv4() {
   [[ -n ${FOREIGN_EGRESS_IPV4:-} ]] || return 0
   ipv4_to_int "$FOREIGN_EGRESS_IPV4" >/dev/null \
     || die "FOREIGN_EGRESS_IPV4 is not a valid IPv4 address: $FOREIGN_EGRESS_IPV4"
+  [[ $FOREIGN_EGRESS_IPV4 != 0.0.0.0 ]] || die "FOREIGN_EGRESS_IPV4 must not be 0.0.0.0"
   case "$FOREIGN_EGRESS_IPV4" in
     "$FOREIGN_TUNNEL_IP"|"$RU_TUNNEL_IP")
       die "FOREIGN_EGRESS_IPV4 must not be a tunnel IP: $FOREIGN_EGRESS_IPV4" ;;
@@ -173,27 +173,11 @@ validate_foreign_egress_ipv4() {
 
 he_tunnel_wanted() { [[ $GOOGLE_IPV6_EGRESS == 1 && -n $HE_SERVER_IPV4 ]]; }
 
-# Tunnel server of the installed unit, so a changed or cleared env can still
-# remove the old UFW rule.
-installed_he_server() {
-  [[ -r $HE_UNIT ]] || return 0
-  sed -nE '/ remote /{s/.* remote ([0-9.]+) .*/\1/p;q}' "$HE_UNIT"
-}
-
-delete_he_ufw_rule() {
-  local server=$1
-  [[ -n $server && ${ENABLE_UFW:-1} == 1 ]] || return 0
-  ufw --force delete allow proto ipv6 from "$server" >>"$LOG" 2>&1 || true
-}
-
 remove_he_tunnel() {
   [[ -e $HE_UNIT ]] || return 0
-  local old
-  old=$(installed_he_server)
   systemctl disable --now belka-he-ipv6 >>"$LOG" 2>&1 || true
   rm -f "$HE_UNIT"
   systemctl daemon-reload
-  delete_he_ufw_rule "$old"
   log INFO "HE IPv6 tunnel removed"
 }
 
@@ -204,9 +188,6 @@ setup_google_ipv6() {
   fi
 
   if he_tunnel_wanted; then
-    local old
-    old=$(installed_he_server)
-    [[ $old == "$HE_SERVER_IPV4" ]] || delete_he_ufw_rule "$old"
     export FOREIGN_PUBLIC_IP HE_SERVER_IPV4 HE_CLIENT_IPV6
     render_template "$SCRIPT_DIR/../config/foreign/he-ipv6.service.tpl" "$HE_UNIT" 644
     systemctl daemon-reload
@@ -318,12 +299,43 @@ xray_config_backup() {
   printf '%s\n' "$BELKA_CONFIG_DIR/xray-config.prev"
 }
 
-# Snapshot the config that is currently on disk before rendering a replacement.
-# If this fails, the caller aborts before touching $XRAY_CONFIG.
+# Preserve the working config before changes to either awg0 or Xray.
 backup_xray_config() {
-  [[ -f $XRAY_CONFIG ]] || return 0
+  [[ -r $XRAY_CONFIG ]] && systemctl is-active -q xray || return 0
+  local endpoint host port
+  endpoint=$(xray_socks_endpoint "$XRAY_CONFIG") || return 0
+  read -r host port <<< "$endpoint"
+  xray_socks_ready "$host" "$port" || return 0
   install -d -m 700 "$BELKA_CONFIG_DIR"
-  install -m 600 "$XRAY_CONFIG" "$(xray_config_backup)"
+  write_if_changed "$(xray_config_backup)" 600 < "$XRAY_CONFIG"
+}
+
+xray_socks_endpoint() {
+  jq -er '.inbounds[]? | select(.tag == "socks-foreign" and .protocol == "socks")
+    | select((.listen | type) == "string" and (.port | type) == "number")
+    | [.listen, .port] | @tsv' "$1" 2>/dev/null
+}
+
+# Test the no-auth SOCKS5 handshake locally so a third-party outage cannot
+# trigger a rollback of a working Xray listener.
+xray_socks_ready() {
+  timeout 2 bash -c '
+    exec 3<>"/dev/tcp/$1/$2" || exit 1
+    printf "\x05\x01\x00" >&3
+    [[ $(od -An -tx1 -N2 <&3) == " 05 00" ]]
+  ' bash "$1" "$2" 2>/dev/null
+}
+
+restart_xray_ready() {
+  local host=$1 port=$2 attempt
+  systemctl restart xray >>"$LOG" 2>&1 || return 1
+  for attempt in 1 2 3 4 5; do
+    if systemctl is-active -q xray && xray_socks_ready "$host" "$port"; then
+      return 0
+    fi
+    [[ $attempt == 5 ]] || sleep 1
+  done
+  return 1
 }
 
 render_xray() {
@@ -334,50 +346,42 @@ render_xray() {
   fi
   export FOREIGN_TUNNEL_IP SOCKS_PORT XRAY_EXTRA_OUTBOUNDS XRAY_EXTRA_RULES \
     XRAY_DIRECT_SEND_THROUGH
-  backup_xray_config
-  render_template_validated "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
-    "$XRAY_CONFIG" 644 /usr/local/bin/xray run -test -config
-  local cfg_changed=$TEMPLATE_CHANGED
-  XRAY_CONFIG_CHANGED=$cfg_changed
-
   write_if_changed /etc/systemd/system/xray.service.d/10-awg.conf 644 <<'EOF'
 [Unit]
 After=awg-quick@awg0.service
-Wants=awg-quick@awg0.service
+Requires=awg-quick@awg0.service
 EOF
   local unit_changed=$TEMPLATE_CHANGED
   systemctl daemon-reload
 
-  if (( cfg_changed || unit_changed )); then
-    TEMPLATE_CHANGED=1
-  else
-    TEMPLATE_CHANGED=0
-  fi
-  systemctl enable xray >>"$LOG" 2>&1 || true
+  render_template_validated "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
+    "$XRAY_CONFIG" 644 /usr/local/bin/xray run -test -config
+  TEMPLATE_CHANGED=$(( TEMPLATE_CHANGED || unit_changed ))
   log INFO "rendered $XRAY_CONFIG"
 }
 
 start_xray() {
-  local backup
-  backup=$(xray_config_backup)
-  if (( TEMPLATE_CHANGED )) || ! systemctl is-active -q xray; then
-    if ! systemctl restart xray >>"$LOG" 2>&1; then
-      if (( XRAY_CONFIG_CHANGED )) && [[ -f $backup ]]; then
-        warn "xray failed with the new config; restoring $backup"
-        install -m 644 "$backup" "$XRAY_CONFIG"
-        if ! systemctl restart xray >>"$LOG" 2>&1; then
-          die "xray failed to start and restoring the previous config did not help; check: journalctl -u xray -n 100"
-        fi
-        die "xray failed with the new config; previous config restored and xray is running"
-      fi
-      die "xray failed to start; check: journalctl -u xray -n 100"
-    fi
-    log INFO "xray restarted"
-    install -m 600 "$XRAY_CONFIG" "$backup" \
-      || warn "could not refresh $backup"
+  local backup endpoint host port
+  if (( ! TEMPLATE_CHANGED )) && systemctl is-active -q xray \
+      && xray_socks_ready "$FOREIGN_TUNNEL_IP" "$SOCKS_PORT"; then
+    log INFO "xray unchanged and SOCKS is ready"
+  elif restart_xray_ready "$FOREIGN_TUNNEL_IP" "$SOCKS_PORT"; then
+    log INFO "xray restarted and SOCKS is ready"
   else
-    log INFO "xray unchanged and active"
+    backup=$(xray_config_backup)
+    if [[ -r $backup ]] && ! cmp -s "$backup" "$XRAY_CONFIG" \
+        && endpoint=$(xray_socks_endpoint "$backup"); then
+      read -r host port <<< "$endpoint"
+      warn "xray SOCKS did not become ready; restoring $backup"
+      write_if_changed "$XRAY_CONFIG" 644 < "$backup"
+      if restart_xray_ready "$host" "$port"; then
+        die "xray SOCKS failed with the new config; previous config restored and SOCKS is ready"
+      fi
+      die "previous Xray config restored but SOCKS is still unavailable; check: journalctl -u xray -n 100"
+    fi
+    die "xray SOCKS did not become ready; check: journalctl -u xray -n 100"
   fi
+  systemctl enable xray >>"$LOG" 2>&1 || die "could not enable xray at boot"
 }
 
 setup_firewall_foreign() {
@@ -385,18 +389,51 @@ setup_firewall_foreign() {
     log INFO "UFW disabled by env"
     return 0
   fi
-  ufw --force default deny incoming >>"$LOG" 2>&1
-  ufw --force default allow outgoing >>"$LOG" 2>&1
-  ufw_limit "$SSH_PORT/tcp"
-  ufw_allow from "$RU_PUBLIC_IP" to any port "$AWG_PORT" proto udp
-  ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto tcp
-  ufw_allow in on awg0 from "$RU_TUNNEL_IP" to "$FOREIGN_TUNNEL_IP" port "$SOCKS_PORT" proto udp
-  if he_tunnel_wanted; then
-    ufw_allow proto ipv6 from "$HE_SERVER_IPV4"
+  local added rule status action
+  local -a args
+  added=$(LC_ALL=C ufw show added) || die "could not read configured UFW rules"
+  while IFS= read -r rule; do
+    ufw_rule_present "$added" "$rule" && continue
+    read -r -a args <<< "$rule"
+    for action in allow deny reject limit; do
+      [[ $action == "${args[0]}" ]] && continue
+      if ufw_rule_present "$added" "$action ${rule#* }"; then
+        die "existing UFW rule conflicts with $rule; review ufw show added"
+      fi
+    done
+    if [[ ${args[0]} == allow ]]; then
+      args+=(comment "$UFW_TUNNEL_COMMENT")
+    fi
+    ufw_rule "${args[@]}"
+  done < <(foreign_ufw_rules)
+  status=$(LC_ALL=C ufw status verbose) || die "could not read UFW status"
+  if ! grep -Fq 'Default: deny (incoming)' <<< "$status"; then
+    ufw --force default deny incoming >>"$LOG" 2>&1
   fi
-  ufw --force enable >>"$LOG" 2>&1
+  if ! grep -Fq 'allow (outgoing)' <<< "$status"; then
+    ufw --force default allow outgoing >>"$LOG" 2>&1
+  fi
+  if ! grep -Fxq 'Status: active' <<< "$status"; then
+    ufw --force enable >>"$LOG" 2>&1
+  fi
   ufw status verbose >>"$LOG" 2>&1 || true
   log INFO "UFW enabled: SSH, UDP/$AWG_PORT from $RU_PUBLIC_IP, SOCKS only on awg0"
+}
+
+# Only delete commands marked as Belka-owned. Existing unmarked rules may
+# belong to the administrator. SSH rules are deliberately outside this cleanup.
+prune_foreign_ufw_rules() {
+  [[ $ENABLE_UFW == 1 ]] || return 0
+  local desired=$1 added rule
+  local -a args
+  added=$(LC_ALL=C ufw show added) || die "could not read configured UFW rules"
+  while IFS= read -r rule; do
+    grep -Fxq "$rule" <<< "$desired" && continue
+    read -r -a args <<< "$rule"
+    ufw --force delete "${args[@]}" >>"$LOG" 2>&1 \
+      || die "could not remove obsolete Belka UFW rule: $rule"
+    log INFO "ufw: removed obsolete Belka rule: $rule"
+  done < <(foreign_ufw_managed_rules <<< "$added")
 }
 
 summary_foreign() {
@@ -440,11 +477,7 @@ uninstall_foreign() {
   systemctl daemon-reload || true
   systemctl disable --now awg-quick@awg0 2>/dev/null || true
   rm -f "$AWG_DIR/awg0.conf"
-  if [[ ${ENABLE_UFW:-1} == 1 ]]; then
-    ufw --force delete allow from "${RU_PUBLIC_IP:-}" to any port "$AWG_PORT" proto udp 2>/dev/null || true
-    ufw --force delete allow in on awg0 from "${RU_TUNNEL_IP:-}" to "${FOREIGN_TUNNEL_IP:-}" port "$SOCKS_PORT" proto tcp 2>/dev/null || true
-    ufw --force delete allow in on awg0 from "${RU_TUNNEL_IP:-}" to "${FOREIGN_TUNNEL_IP:-}" port "$SOCKS_PORT" proto udp 2>/dev/null || true
-  fi
+  prune_foreign_ufw_rules ""
   log INFO "FOREIGN components stopped/removed"
 }
 
@@ -468,15 +501,37 @@ main() {
     exit 0
   fi
 
+  local stored_handoff=$BELKA_CONFIG_DIR/ru-handoff.env
+  # RU public key: explicit argument > handoff file > stored handoff.
+  if [[ -n $HANDOFF_IN ]]; then
+    load_handoff "$HANDOFF_IN" ru
+  elif [[ -r $stored_handoff ]]; then
+    load_handoff "$stored_handoff" ru
+  fi
+  if [[ -n $RU_PUB_KEY_ARG ]]; then
+    handoff_valid_wg_key "$RU_PUB_KEY_ARG" \
+      || die "--ru-pub is not a valid WireGuard public key"
+    RU_PUBLIC_KEY=$RU_PUB_KEY_ARG
+  fi
+  export RU_PUBLIC_KEY="${RU_PUBLIC_KEY:-}"
   validate_tunnel_net
+  handoff_valid_ipv4 "$FOREIGN_PUBLIC_IP" || die "invalid FOREIGN_PUBLIC_IP"
+  handoff_valid_ipv4 "$RU_PUBLIC_IP" || die "invalid RU_PUBLIC_IP"
+  local port_var
+  for port_var in AWG_PORT SOCKS_PORT SSH_PORT; do
+    handoff_valid_port "${!port_var}" || die "invalid $port_var"
+  done
+  handoff_valid_mtu "$AWG_MTU" || die "invalid AWG_MTU"
   validate_google_ipv6
   validate_foreign_egress_ipv4
 
   if (( DRY_RUN )); then
     log INFO "dry-run: would install AmneziaWG + Xray, write $AWG_DIR/awg0.conf,"
-    log INFO "dry-run: open UDP/$AWG_PORT from $RU_PUBLIC_IP and TCP+UDP/$SOCKS_PORT on awg0"
+    if [[ $ENABLE_UFW == 1 ]]; then
+      log INFO "dry-run: configure UFW for UDP/$AWG_PORT from $RU_PUBLIC_IP and TCP+UDP/$SOCKS_PORT on awg0"
+    fi
     if he_tunnel_wanted; then
-      log INFO "dry-run: would bring up HE 6in4 tunnel to $HE_SERVER_IPV4 ($HE_CLIENT_IPV6) and allow proto 41 from it"
+      log INFO "dry-run: would bring up HE 6in4 tunnel to $HE_SERVER_IPV4 ($HE_CLIENT_IPV6)"
     fi
     if [[ $GOOGLE_IPV6_EGRESS == 1 ]]; then
       log INFO "dry-run: would route geosite:google over IPv6 (outbound google-v6, ForceIPv6)"
@@ -493,28 +548,20 @@ main() {
   gen_keypair
   load_or_gen_obfuscation
 
-  # RU public key: explicit argument > handoff file > stored handoff.
-  if [[ -n $HANDOFF_IN ]]; then
-    load_handoff "$HANDOFF_IN" ru
-    install -D -m 600 "$HANDOFF_IN" "$BELKA_CONFIG_DIR/ru-handoff.env"
-  elif [[ -r $BELKA_CONFIG_DIR/ru-handoff.env ]]; then
-    load_handoff "$BELKA_CONFIG_DIR/ru-handoff.env" ru
-  fi
-  if [[ -n $RU_PUB_KEY_ARG ]]; then
-    handoff_valid_wg_key "$RU_PUB_KEY_ARG" \
-      || die "--ru-pub is not a valid WireGuard public key"
-    RU_PUBLIC_KEY=$RU_PUB_KEY_ARG
-  fi
-  export RU_PUBLIC_KEY="${RU_PUBLIC_KEY:-}"
-
-  write_foreign_handoff
+  backup_xray_config
+  setup_firewall_foreign
   render_foreign_awg
   start_awg
   setup_google_ipv6
   install_xray
   render_xray
   start_xray
-  setup_firewall_foreign
+  prune_foreign_ufw_rules "$(foreign_ufw_rules)"
+  if [[ -n $HANDOFF_IN && ! $HANDOFF_IN -ef $stored_handoff ]]; then
+    install -d -m 700 "$BELKA_CONFIG_DIR"
+    write_if_changed "$stored_handoff" 600 < "$HANDOFF_IN"
+  fi
+  write_foreign_handoff
   setup_fail2ban
   harden_ssh
   summary_foreign

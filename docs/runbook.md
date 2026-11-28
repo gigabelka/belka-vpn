@@ -78,12 +78,15 @@ bash scripts/install-foreign.sh --env-file /etc/belka-vpn/foreign.env
 1. ставит базовые пакеты, sysctl (BBR, буферы, `tcp_mtu_probing`), logrotate;
 2. ставит AmneziaWG (PPA), заголовки ядра, `awg-quick`;
 3. генерирует ключи зарубежного сервера и параметры обфускации;
-4. пишет `/root/belka-foreign-handoff.env`;
+4. настраивает UFW: SSH (`limit`), UDP-порт только с российского IP, SOCKS (TCP и UDP)
+   только на `awg0` с RU;
 5. пишет `/etc/amnezia/amneziawg/awg0.conf` (пока без peer RU) и поднимает `awg0`;
 6. при `GOOGLE_IPV6_EGRESS=1` — IPv6-выход для Google (см. ниже), иначе пропускается;
-7. ставит Xray-core, SOCKS на `172.16.0.1:1080`, systemd drop-in после `awg0`;
-8. настраивает UFW: SSH (`limit`), UDP-порт только с российского IP, 1080 (TCP и UDP)
-   только на `awg0` с `172.16.0.2`;
+7. ставит Xray-core и SOCKS на `172.16.0.1:1080`. Xray стартует после успешного
+   запуска `awg0`. Установщик проверяет SOCKS5 и при сбое пробует восстановить
+   предыдущий рабочий конфиг из `/etc/belka-vpn/xray-config.prev`;
+8. убирает устаревшие правила с меткой `belka-vpn-tunnel` и публикует
+   `/root/belka-foreign-handoff.env`;
 9. fail2ban для SSH; при `HARDEN_SSH=1` — hardening SSH.
 
 Проверка:
@@ -93,6 +96,12 @@ awg show
 ss -lntp | grep 1080           # только 172.16.0.1:1080
 ufw status verbose
 ```
+
+При первом обновлении с версии без меток просмотрите `ufw show added` после успешной
+проверки туннеля. Старые туннельные правила без метки сохраняются, поскольку они могут
+принадлежать администратору. Удалите вручную те из них, чьё происхождение подтверждено
+и которые больше не нужны. При смене SSH-порта проверьте вход в новой сессии до
+удаления старого разрешения.
 
 ## 4. Россия: ключи
 
@@ -204,7 +213,10 @@ bash scripts/verify.sh
 bash scripts/verify.sh --role foreign
 ```
 
-Клиентские проверки:
+На RU серверная проверка требует активного `hiddify-xray` и слушающего TCP/443.
+На FOREIGN она проверяет локальный SOCKS, его IPv4-выход и ожидаемые правила UFW,
+если `ENABLE_UFW=1`. После обновлений выполните клиентские проверки, чтобы пройти
+через VLESS и фактически загруженные правила маршрутизации:
 
 1. `https://api.ipify.org` (или `https://ifconfig.me/ip`) → российский IP. `ipinfo.io`
    может уйти через FOREIGN, если его адрес попадает в `geoip:google`.
@@ -281,8 +293,9 @@ IPv4. RU и панель Hiddify не меняются.
    страна Google для FOREIGN не должна быть `ru`.
 5. На клиенте очистите site data `gemini.google.com` и войдите заново.
 
-Отключение: `GOOGLE_IPV6_EGRESS=0` и повторный запуск установщика. Юнит туннеля и
-правило UFW удаляются.
+Для отключения установите `GOOGLE_IPV6_EGRESS=0` и повторите запуск установщика.
+Он удалит юнит туннеля и правило UFW с меткой `belka-vpn-tunnel`. Правило старой
+версии без метки проверьте по процедуре из раздела 3.
 
 ## Исходящий IPv4 для Google (sendThrough)
 
@@ -327,8 +340,10 @@ Telegram, OpenAI и остальные сервисы без отдельног�
    ```
 
    Без `--expect-country` режим печатает страну и падает только на `ru`/пустом ответе.
-   Фактический исходящий адрес проверяется так:
-   `bash scripts/verify.sh --expect-egress <ip>`.
+   Публичный адрес проверяется отдельно от локального `sendThrough`. На RU выполните
+   `bash scripts/verify.sh --expect-egress <публичный-IP>`, а на FOREIGN —
+   `bash scripts/verify.sh --role foreign --expect-egress <публичный-IP>`.
+   Явно заданный адрес должен совпасть с фактическим, иначе проверка завершится с FAIL.
    Затем проверьте в клиенте Google Search (страна и источник «по интернет-адресу»),
    Gemini после входа и воспроизведение YouTube.
 
@@ -346,17 +361,17 @@ Telegram, OpenAI и остальные сервисы без отдельног�
 
 ### Доставка кода на серверы с Windows
 
-`/opt/belka-vpn` на серверах — копия из tar, а не git-клон. Если в рабочей копии
-`core.autocrlf=true`, то и tar рабочей копии, и обычный `git archive` дают CRLF, и bash
-падает с `$'\r': command not found`. Собирайте архив из коммита с LF и передавайте его
-из Git Bash: PowerShell 5.1 портит двоичный поток в пайпе.
+Для серверов, где `/opt/belka-vpn` доставляется архивом, собирайте его из коммита
+и передавайте из Git Bash. `.gitattributes` закрепляет LF. Параметры Git в команде
+также гарантируют LF для старых коммитов. PowerShell 5.1 портит двоичный поток в пайпе.
 
 ```bash
 git -c core.autocrlf=false -c core.eol=lf archive --format=tar -o deploy.tar \
-  HEAD scripts config docs tests .env.example README.md
+  HEAD scripts config docs tests .env.example .gitattributes .gitignore README.md
 python -c "import tarfile,sys; t=tarfile.open(sys.argv[1]); \
-print([m.name for m in t if m.isfile() and b'\r' in t.extractfile(m).read()] or 'no CR')" deploy.tar
-ssh root@<server> 'tar -x -C /opt/belka-vpn && bash /opt/belka-vpn/tests/lint.sh' < deploy.tar
+bad=[m.name for m in t if m.isfile() and b'\r' in t.extractfile(m).read()]; \
+print(bad or 'no CR'); sys.exit(bool(bad))" deploy.tar &&
+  ssh root@<server> 'tar -x -C /opt/belka-vpn && bash /opt/belka-vpn/tests/lint.sh' < deploy.tar
 ```
 
 CR проверяйте Python-ом, а не `grep $'\r'`: grep из Git Bash CR не находит.
@@ -437,9 +452,9 @@ fail2ban на RU банит через маршрут (`banaction = route`), а 
 
 ## 12. Известные расхождения конфигурации серверов
 
-Открытых расхождений нет. Последняя сверка — 2026-11-24: код в `/opt/belka-vpn` на
-обоих серверах совпадает с репозиторием, `verify.sh` проходит без FAIL (RU 26/0,
-FOREIGN 7/0).
+На сверке 2026-11-24 открытых расхождений не нашли. Код в `/opt/belka-vpn` на обоих
+серверах совпадал с тогдашней версией репозитория. `verify.sh` прошёл без FAIL
+(RU 26/0, FOREIGN 7/0).
 
 Закрыто 2026-11-24: на RU включён «Only IPv4»; `REALITY_SNI` в `ru.env` приведён к
 фактическому SNI Reality из панели, чек-лист в `/root` пересобран; сохранённый handoff

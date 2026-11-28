@@ -93,17 +93,17 @@ git clone https://github.com/gigabelka/belka-vpn.git /opt/belka-vpn
 ```
 
 Если GitHub с сервера недоступен (актуально для РФ), соберите архив из коммита с LF и
-передайте его из Git Bash (не из PowerShell 5.1: он портит двоичный поток в пайпе):
+передайте его из Git Bash. После сборки и перед отправкой выполните проверку CR из
+раздела «Доставка кода на серверы с Windows» в `docs/runbook.md`.
 
 ```bash
 # с рабочей станции, Git Bash
 git -c core.autocrlf=false -c core.eol=lf archive --format=tar -o deploy.tar \
-  HEAD scripts config docs tests .env.example README.md
+  HEAD scripts config docs tests .env.example .gitattributes .gitignore README.md
+# После успешной проверки архива:
 ssh -i <key> root@<RU_IP> 'mkdir -p /opt/belka-vpn && tar -x -C /opt/belka-vpn' < deploy.tar
 ssh -i <key> root@<FOREIGN_IP> 'mkdir -p /opt/belka-vpn && tar -x -C /opt/belka-vpn' < deploy.tar
 ```
-
-Проверка CR перед отправкой — `docs/runbook.md`, раздел «Доставка кода на серверы с Windows».
 
 `bootstrap.sh` (см. «Обновление») требует уже готовый env-файл из шага 2 и сразу запускает установщик, поэтому он заменяет шаги 1 и 3 только после того, как env создан.
 
@@ -241,6 +241,7 @@ bash scripts/verify.sh --role foreign
 Ожидается:
 
 - handshake AmneziaWG свежий;
+- на RU активен `hiddify-xray` и открыт вход TCP/443;
 - `curl --socks5-hostname 172.16.0.1:1080 https://api.ipify.org` → зарубежный IP;
 - YouTube через зарубежный сервер → 204;
 - `verify.sh` требует sniffing (`http/tls/quic`, `routeOnly=false`) у **всех** VLESS-inbound, включая `reality terminator`: без этого часть соединений к rutracker/instagram уходит в `Direct` (см. `docs/troubleshooting.md`);
@@ -249,6 +250,10 @@ bash scripts/verify.sh --role foreign
 - `api.anthropic.com` → 400/401/404/405, **не** 403;
 - `api.openai.com/v1/models` → 401 без ключа, **не** 403;
 - в клиенте `api.ipify.org` → российский IP (`ipinfo.io` может уйти через FOREIGN, если его адрес попадает в `geoip:google`), а YouTube/Google/Claude/ChatGPT и Telegram (сообщения и медиа) идут через зарубежный сервер.
+
+После обновлений повторите обе проверки из подключённого клиента Hiddify. Серверный
+`verify.sh` проверяет правила RU и доступ к FOREIGN SOCKS напрямую. Клиентская проверка
+дополнительно охватывает VLESS и применение правил запущенным Xray.
 
 ## Обновление
 
@@ -261,14 +266,12 @@ bash /root/bootstrap.sh foreign --ref main --env-file /etc/belka-vpn/foreign.env
 работать (`exists but is not a git repository`): заново передайте архив и запустите
 скрипт установки.
 
-Копируете с Windows — собирайте архив так, чтобы в нём были переводы строк LF: при
-`core.autocrlf=true` и tar рабочей копии, и обычный `git archive` дают CRLF, и bash на
-сервере падает с `$'\r': command not found`. Порядок действий — `docs/runbook.md`, раздел
-«Обновление и ротация».
+С Windows собирайте архив из коммита. `.gitattributes` закрепляет LF для текстовых
+файлов, а проверка архива в runbook обнаруживает CR перед доставкой на Linux.
 
 Скрипты идемпотентны: повторный запуск не дублирует правила, не перегенерирует ключи и не перезапускает сервисы без изменений. Ротация — `ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1` (с последующей передачей handoff на другую сторону, см. `docs/runbook.md`).
 
-Дополнительные аргументы `bootstrap.sh` передаются установщику; явный разделитель — `--`, например `bootstrap.sh ru -- --handoff /root/belka-foreign-handoff.env --dry-run`. Сам `bootstrap.sh` забирает `--ref`, `--env-file`, `-h`. С `--dry-run` он не выполняет `apt-get` и `git fetch/checkout`, требует уже существующий checkout в `/opt/belka-vpn` и передаёт `--dry-run` установщику.
+Дополнительные аргументы `bootstrap.sh` передаются установщику. Явный разделитель — `--`, например `bootstrap.sh ru -- --handoff /root/belka-foreign-handoff.env --dry-run`. Сам `bootstrap.sh` забирает `--ref`, `--env-file`, `-h`. С `--dry-run` он запускает установщик из существующего checkout без `apt-get` и `git fetch/checkout`. Установщик проверяет handoff и адреса туннеля, печатает план и завершает работу.
 
 ## Откат
 

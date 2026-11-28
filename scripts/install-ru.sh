@@ -31,7 +31,7 @@ Options:
   --keys-only       Install AmneziaWG, generate RU keys, write RU handoff
   --handoff FILE    FOREIGN handoff with FOREIGN_PUBLIC_KEY and obfuscation parameters
   --uninstall       Stop and remove RU tunnel components (Hiddify is kept)
-  --dry-run         Print the plan and exit
+  --dry-run         Validate inputs and print the plan
   -h, --help        Show this help
 EOF
 }
@@ -406,14 +406,6 @@ main() {
     exit 0
   fi
 
-  if (( DRY_RUN )); then
-    log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write the hiddify-core compatibility drop-in,"
-    log INFO "dry-run: apply the REALITY-termination sniffing override (built-in proxy server_config) and regenerate Hiddify configs,"
-    log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT, set IP forwarding (RU_IP_FORWARD=$RU_IP_FORWARD)"
-    log INFO "dry-run: and print the manual checklist"
-    exit 0
-  fi
-
   if (( KEYS_ONLY )); then
     install_base_packages
     check_tunnel_conflict
@@ -435,11 +427,6 @@ EOF
     HANDOFF_IN=${FOREIGN_HANDOFF_FILE:-$stored_handoff}
   fi
   load_handoff "$HANDOFF_IN" foreign
-  # On reruns the input is the stored copy itself; install(1) refuses to copy
-  # a file onto itself.
-  if [[ ! -e $stored_handoff || ! $HANDOFF_IN -ef $stored_handoff ]]; then
-    install -D -m 600 "$HANDOFF_IN" "$stored_handoff"
-  fi
   if [[ -n $local_ru_public_ip ]]; then
     RU_PUBLIC_IP=$local_ru_public_ip
   fi
@@ -447,13 +434,16 @@ EOF
     REALITY_SNI=$local_reality_sni
   fi
 
-  : "${FOREIGN_PUBLIC_KEY:?FOREIGN handoff missing FOREIGN_PUBLIC_KEY}"
-  local v
-  for v in AWG_JC AWG_JMIN AWG_JMAX AWG_S1 AWG_S2 AWG_H1 AWG_H2 AWG_H3 AWG_H4; do
-    [[ -n ${!v:-} ]] || die "FOREIGN handoff missing $v"
-  done
-  # The handoff may carry TUNNEL_NET and the tunnel IPs; validate the result.
   validate_tunnel_net
+  (( 10#$AWG_JMAX <= 10#$AWG_MTU )) || die "AWG_JMAX exceeds AWG_MTU in FOREIGN handoff"
+
+  if (( DRY_RUN )); then
+    log INFO "dry-run: would install AmneziaWG + Hiddify Manager, write the hiddify-core compatibility drop-in,"
+    log INFO "dry-run: apply the REALITY-termination sniffing override (built-in proxy server_config) and regenerate Hiddify configs,"
+    log INFO "dry-run: write $AWG_DIR/awg0.conf, start awg0 to $FOREIGN_PUBLIC_IP:$AWG_PORT, set IP forwarding (RU_IP_FORWARD=$RU_IP_FORWARD)"
+    log INFO "dry-run: and print the manual checklist"
+    exit 0
+  fi
 
   install_base_packages
   preflight_ru
@@ -464,6 +454,10 @@ EOF
   write_ru_handoff
   render_ru_awg
   start_awg
+  if [[ ! $HANDOFF_IN -ef $stored_handoff ]]; then
+    install -d -m 700 "$BELKA_CONFIG_DIR"
+    write_if_changed "$stored_handoff" 600 < "$HANDOFF_IN"
+  fi
   configure_ip_forwarding
   # Hiddify Manager owns the RU firewall: ban via blackhole routes, not iptables.
   setup_fail2ban route

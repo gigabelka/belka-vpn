@@ -1,2 +1,2 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# Keep deployment text files in LF on Windows and Linux.
+* text=auto eol=lf

@@ -80,6 +80,9 @@ directly instead of via a handoff file. `bootstrap.sh` consumes the role word, `
 forwarded to the selected installer. It requires an existing env file and immediately
 runs the installer; with `--dry-run` it skips apt-get and git fetch/checkout, requires
 an existing checkout, and forwards the flag.
+Both installers validate the effective handoff and tunnel settings during a dry run.
+FOREIGN still accepts a first pass without a handoff. Installers save a supplied
+handoff after activating the tunnel (and, on FOREIGN, after SOCKS readiness).
 
 ## Architecture
 
@@ -102,8 +105,8 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   otherwise; a dry run only warns) and is applied to all direct egress. It is
   FOREIGN-local and not part of the handoff. `verify.sh` checks the rendered value and
   the SOCKS egress; `--google-only [--expect-country CC]` probes Google's `x-country`,
-  and `--expect-egress IP` sets the expected RU-side egress address (default
-  `FOREIGN_PUBLIC_IP`). With `GOOGLE_IPV6_EGRESS=1`, Google hosts use `google-v6` and
+  and `--expect-egress IP` requires the given public IPv4 on either role. RU uses
+  `FOREIGN_PUBLIC_IP` as a warning-only default. With `GOOGLE_IPV6_EGRESS=1`, Google hosts use `google-v6` and
   ignore `sendThrough`; YouTube still uses `direct`.
 - RU has three foreign outbounds plus a default, in this order: `FOREIGN-Domains`
   (explicit domains + geosite, **never `geoip:google`**), `FOREIGN-Google-IP` (only
@@ -148,10 +151,10 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
 - `scripts/install-{foreign,ru}.sh` — per-role installation and orchestration. `install-ru.sh` installs
   Hiddify Manager **before** bringing up `awg0` so the Hiddify installer cannot touch the
   tunnel; it then writes `/root/belka-ru-manual-checklist.txt`.
-- `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer, SOCKS
-  binding (must not listen on `0.0.0.0`), egress IP vs `FOREIGN_PUBLIC_IP` (a mismatch is
-  only a warning), YouTube `generate_204` returns 204, `api.anthropic.com` and
-  `api.openai.com` must not return 403, Hiddify services running.
+- `scripts/verify.sh` — live checks: tunnel handshake age (`<180 s`) and transfer,
+  FOREIGN SOCKS binding, egress and expected UFW rules, RU `hiddify-xray` and TCP/443
+  listener, YouTube `generate_204` returns 204, `api.anthropic.com` and
+  `api.openai.com` must not return 403. The VLESS client path needs a client check.
 - `config/` — `.tpl` files rendered with `envsubst`; only exported variables are
   substituted, and **unset variables silently become empty**. `config/rules/*` are
   written to `/root/belka-foreign-{domains,geosites,telegram-ip}.txt` on RU with comments
@@ -252,9 +255,8 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
 - SSH to FOREIGN from a PC on the VPN egresses via the RU IP and trips `ufw limit 22/tcp`
   ("Connection closed"), not fail2ban. Batch commands per session, or jump through RU
   over the tunnel: `ssh -J root@<RU_PUBLIC_IP> root@172.16.0.1`.
-- Deploying from a Windows checkout: `core.autocrlf=true` makes both a working-tree tar and
-  plain `git archive` CRLF. Build with `git -c core.autocrlf=false -c core.eol=lf archive`
-  and check for CR bytes with Python (Git Bash `grep $'\r'` misses them).
+- Deploying from Windows: `.gitattributes` sets LF for text files. Build an archive from
+  the commit and check it for CR bytes using the Python command in the runbook.
 - Deeper detail: `docs/architecture.md` (rationale), `docs/runbook.md` (deployment
   order), `docs/hiddify-client.md` (Hiddify app setup, Direct and Proxy rules, AllowedIPs,
   strict route), `docs/troubleshooting.md` (diagnosis), and the Russian README quick

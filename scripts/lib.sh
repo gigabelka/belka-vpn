@@ -15,6 +15,7 @@ BELKA_REPO_URL=${BELKA_REPO_URL:-https://github.com/gigabelka/belka-vpn.git}
 BELKA_CONFIG_DIR=${BELKA_CONFIG_DIR:-/etc/belka-vpn}
 AWG_DIR=${AWG_DIR:-/etc/amnezia/amneziawg}
 KEY_DIR=${KEY_DIR:-$AWG_DIR/keys}
+UFW_TUNNEL_COMMENT=belka-vpn-tunnel
 
 ROLE=${ROLE:-}
 LOG=${LOG:-}
@@ -427,14 +428,8 @@ render_template() {
   local tmp
   tmp=$(mktemp)
   envsubst < "$tpl" > "$tmp" || { rm -f "$tmp"; die "envsubst failed: $tpl"; }
-  if [[ -f $out ]] && cmp -s "$tmp" "$out"; then
-    rm -f "$tmp"
-    TEMPLATE_CHANGED=0
-  else
-    install -D -m "$mode" "$tmp" "$out"
-    rm -f "$tmp"
-    TEMPLATE_CHANGED=1
-  fi
+  write_if_changed "$out" "$mode" < "$tmp"
+  rm -f "$tmp"
 }
 
 # render_template_validated TEMPLATE DEST MODE VALIDATOR [ARGS...]
@@ -447,34 +442,32 @@ render_template_validated() {
   shift 3
   [[ -r $tpl ]] || die "template not found: $tpl"
   local tmp
-  tmp=$(mktemp)
+  # Validators such as Xray use the filename suffix to select the parser.
+  tmp=$(mktemp --suffix=".$(basename -- "$out")")
   envsubst < "$tpl" > "$tmp" || { rm -f "$tmp"; die "envsubst failed: $tpl"; }
   if ! "$@" "$tmp" >>"$LOG" 2>&1; then
     rm -f "$tmp"
     die "rendered $out failed validation ($1); existing file kept (details in $LOG)"
   fi
-  if [[ -f $out ]] && cmp -s "$tmp" "$out"; then
-    rm -f "$tmp"
-    TEMPLATE_CHANGED=0
-  else
-    install -D -m "$mode" "$tmp" "$out"
-    rm -f "$tmp"
-    TEMPLATE_CHANGED=1
-  fi
+  write_if_changed "$out" "$mode" < "$tmp"
+  rm -f "$tmp"
 }
 
-# Writes stdin to a file if the content changed. Sets TEMPLATE_CHANGED.
+# Atomically writes stdin if the content changed. Sets TEMPLATE_CHANGED.
 write_if_changed() {
-  local dst=$1 mode=${2:-600}
-  local tmp
-  tmp=$(mktemp)
-  cat > "$tmp"
+  local dst=$1 mode=${2:-600} dir tmp
+  dir=$(dirname -- "$dst")
+  mkdir -p -- "$dir"
+  tmp=$(mktemp "$dir/.belka.XXXXXXXX")
+  cat > "$tmp" || { rm -f -- "$tmp"; die "could not stage $dst"; }
   if [[ -f $dst ]] && cmp -s "$tmp" "$dst"; then
     rm -f "$tmp"
     TEMPLATE_CHANGED=0
   else
-    install -D -m "$mode" "$tmp" "$dst"
-    rm -f "$tmp"
+    if ! chmod "$mode" "$tmp" || ! mv -fT -- "$tmp" "$dst"; then
+      rm -f -- "$tmp"
+      die "could not replace $dst"
+    fi
     TEMPLATE_CHANGED=1
   fi
 }
@@ -510,8 +503,39 @@ ufw_rule() {
   log INFO "ufw: $verb $*"
 }
 
-ufw_allow() { ufw_rule allow "$@"; }
-ufw_limit() { ufw_rule limit "$@"; }
+# Generate the normalized commands reported by "ufw show added".
+foreign_ufw_rules() {
+  printf '%s\n' "limit $SSH_PORT/tcp" \
+    "allow from $RU_PUBLIC_IP to any port $AWG_PORT proto udp" \
+    "allow in on awg0 from $RU_TUNNEL_IP to $FOREIGN_TUNNEL_IP port $SOCKS_PORT proto tcp" \
+    "allow in on awg0 from $RU_TUNNEL_IP to $FOREIGN_TUNNEL_IP port $SOCKS_PORT proto udp"
+  if [[ $GOOGLE_IPV6_EGRESS == 1 && -n $HE_SERVER_IPV4 ]]; then
+    printf '%s\n' "allow from $HE_SERVER_IPV4 proto ipv6"
+  fi
+}
+
+ufw_rule_present() {
+  local added=$1 expected=$2 line
+  while IFS= read -r line; do
+    if [[ $line == "ufw $expected" || $line == "ufw $expected comment "* ]]; then
+      return 0
+    fi
+  done <<< "$added"
+  return 1
+}
+
+foreign_ufw_managed_rules() {
+  sed -nE "s/^ufw (allow .*) comment '$UFW_TUNNEL_COMMENT'$/\1/p"
+}
+
+socks_egress_ipv4() {
+  local egress
+  egress=$(curl -4 -fsS --noproxy '' --max-time 15 \
+    --socks5-hostname "${FOREIGN_TUNNEL_IP}:${SOCKS_PORT}" \
+    https://api.ipify.org 2>/dev/null) || return 1
+  ipv4_to_int "$egress" >/dev/null || return 1
+  printf '%s\n' "$egress"
+}
 
 # setup_fail2ban [BANACTION]
 # Without an argument fail2ban keeps its default (iptables-multiport), which is
