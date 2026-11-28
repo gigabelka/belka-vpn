@@ -254,18 +254,25 @@ PY
 
   local cfg=/opt/hiddify-manager/generated/xray.json
   local needs_regen=0
-  if [[ -f $cfg ]] && jq -e '
-      [.inbounds[]?
-       | select((.tag // "") | test("reality terminator"))
-       | select(((.sniffing.enabled // false) == false)
-                or ((.sniffing.routeOnly // false) == true))
-      ] | length == 0' "$cfg" >/dev/null 2>&1; then
-    log INFO "generated Xray config already sniffs on the REALITY terminator"
+  local sniff_jq='
+    def sniff_ok:
+      ((.sniffing.enabled // false) == true)
+      and ((.sniffing.routeOnly // false) == false)
+      and (([(.sniffing.destOverride // [])[]
+             | select(. == "http" or . == "tls" or . == "quic")]
+            | unique | length) == 3);
+    [.inbounds[]? | select((.tag // "") | test("reality terminator"))] as $ib
+    | ($ib | length) > 0 and ([$ib[] | select(sniff_ok | not)] | length == 0)'
+  if [[ -f $cfg ]] && jq -e "$sniff_jq" "$cfg" >/dev/null 2>&1; then
+    log INFO "generated Xray config already sniffs http/tls/quic on the REALITY terminator"
   else
     needs_regen=1
     log INFO "regenerating Hiddify configs to apply the REALITY sniffing override"
     /opt/hiddify-manager/scripts/hiddify sync-configs >>"$LOG" 2>&1 \
       || warn "hiddify sync-configs failed; check Hiddify logs and rerun"
+    if [[ ! -f $cfg ]] || ! jq -e "$sniff_jq" "$cfg" >/dev/null 2>&1; then
+      warn "generated config still lacks full sniffing on the REALITY terminator; apply the override in the panel"
+    fi
   fi
   # sync-configs rewrites generated/xray.json but does not restart Xray, so the
   # running process would keep the old inbound definitions.
@@ -373,6 +380,18 @@ uninstall_ru() {
 
 main() {
   parse_args "$@"
+  if (( UNINSTALL && DRY_RUN )); then
+    printf 'error: --uninstall and --dry-run are mutually exclusive\n' >&2
+    exit 2
+  fi
+  if (( KEYS_ONLY && UNINSTALL )); then
+    printf 'error: --keys-only and --uninstall are mutually exclusive\n' >&2
+    exit 2
+  fi
+  if (( KEYS_ONLY && DRY_RUN )); then
+    printf 'error: --keys-only and --dry-run are mutually exclusive; run --keys-only for real or --dry-run for the full plan\n' >&2
+    exit 2
+  fi
   belka_init ru
   need_root
   check_os
@@ -415,7 +434,7 @@ EOF
   if [[ -z $HANDOFF_IN ]]; then
     HANDOFF_IN=${FOREIGN_HANDOFF_FILE:-$stored_handoff}
   fi
-  load_handoff "$HANDOFF_IN"
+  load_handoff "$HANDOFF_IN" foreign
   # On reruns the input is the stored copy itself; install(1) refuses to copy
   # a file onto itself.
   if [[ ! -e $stored_handoff || ! $HANDOFF_IN -ef $stored_handoff ]]; then

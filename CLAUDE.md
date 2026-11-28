@@ -24,10 +24,11 @@ English. Roles are always named exactly `ru` and `foreign`.
   inverse of the Direct/bypass list), not a server identifier. `tests/lint.sh` excludes
   exactly that path from the IPv4 check and validates separately that it is CIDR-only.
 - Never add `set -x`, and never print private keys or the Hiddify admin link.
-- `load_handoff` deliberately rejects files containing secrets; handoffs carry public
+- `load_handoff` rejects files containing secrets and parses handoffs as `KEY=VALUE`
+  lines against a per-role allowlist; it never sources them. Handoffs carry public
   data only: public keys, obfuscation parameters, and the shared tunnel settings (public
   IPs, `AWG_PORT`, tunnel IPs/net, `SOCKS_PORT`, `AWG_MTU`). The FOREIGN handoff is
-  sourced after `ru.env` and overrides those shared values; `install-ru.sh` restores the
+  parsed after `ru.env` and overrides those shared values; `install-ru.sh` restores the
   RU-owned `RU_PUBLIC_IP` and `REALITY_SNI` afterwards.
 - RU firewall is owned by Hiddify Manager; only the FOREIGN server uses UFW.
   `configure.sh` always writes `ENABLE_UFW=0` to `ru.env`, though `install-ru.sh` never
@@ -70,13 +71,15 @@ bash scripts/verify.sh --role foreign     # on FOREIGN
 bash scripts/bootstrap.sh foreign --env-file /etc/belka-vpn/foreign.env  # fetch ref + run stage
 ```
 
-`install-foreign.sh` and `install-ru.sh` also accept `--dry-run` and `--uninstall`; both
+`install-foreign.sh` and `install-ru.sh` also accept `--dry-run` and `--uninstall`
+(mutually exclusive; `install-ru.sh` also rejects `--keys-only` with either); both
 paths still require an env file containing both public IPs, because the `:?` checks run
 before argument dispatch. `install-foreign.sh --ru-pub KEY` supplies the RU public key
 directly instead of via a handoff file. `bootstrap.sh` consumes the role word, `--ref`
 (default `main`), `--env-file` and `-h`; other arguments, and everything after `--`, are
 forwarded to the selected installer. It requires an existing env file and immediately
-runs the installer.
+runs the installer; with `--dry-run` it skips apt-get and git fetch/checkout, requires
+an existing checkout, and forwards the flag.
 
 ## Architecture
 
@@ -100,7 +103,8 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   first: domains match before any IP rule, and with `routeOnly=false` FOREIGN still
   receives the domain. `FOREIGN-Google-IP` catches Google connections with no
   sniffable domain so a signed-in session never mixes a RU exit IP in. `verify.sh`
-  fails if `geoip:google` shares a rule with domains or sits above the domain rule.
+  fails if `geoip:google` is missing, shares a rule with domains, or sits above the
+  domain rule.
 - `google.com`/`googleapis.com` cover subdomains, but Google AI hosts in the
   `.google`, `.goog` and `.studio` zones (`gemini.google`, `ai.studio`,
   `generativeai.google`, `antigravity.google`, …) are listed explicitly in
@@ -118,8 +122,9 @@ RU 172.16.0.2 ══════ AmneziaWG (UDP/443) ══════ 172.16.0
   `auth.openai.com`), `chatgpt.com` (web and `backend-api`), `oaistatic.com` /
   `oaiusercontent.com` (assets/files), `chatgpt.livekit.cloud` (voice) and
   `sora.com`; `geosite:openai` is a fallback because geo files can lag.
-  `verify.sh` checks `openai.com` and `chatgpt.com` separately and warns on
-  geosite-only or partial coverage.
+  `verify.sh` checks `openai.com` and `chatgpt.com` separately: it warns when
+  coverage is geosite-only and fails when the explicit list is partial and no
+  geosite fallback exists.
 - Hiddify Manager's **Common Proxy Core must be Xray** — `geosite:`/`geoip:` and SNI
   rewriting (`routeOnly=false`, sniffing `http/tls/quic`) only work there.
 - Handoff exchange is circular and public-only: the first run of each role emits
@@ -183,7 +188,8 @@ inactive. Keys and AmneziaWG obfuscation are reused on reruns; rotation is opt-i
   (rutracker, rutor, instagram) go Direct, while `geoip`-based Google/Telegram still work.
   `install-ru.sh` (`apply_hiddify_reality_sniffing`) stores a built-in-proxy
   `server_config` override with `sniffing (http/tls/quic), routeOnly=false`; `verify.sh`
-  requires sniffing on every VLESS inbound. Never add sniffing by editing
+  requires enabled `http/tls/quic` sniffing with `routeOnly=false` on every VLESS
+  inbound and fails when there are none. Never add sniffing by editing
   `generated/xray.json` or site-packages: Hiddify regenerates/overwrites both.
   `hiddify sync-configs` only rewrites `generated/xray.json`; restart `hiddify-xray`
   afterwards to load it.

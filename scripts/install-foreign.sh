@@ -19,6 +19,8 @@ HANDOFF_IN=""
 RU_PUB_KEY_ARG=""
 UNINSTALL=0
 DRY_RUN=0
+XRAY_CONFIG=/usr/local/etc/xray/config.json
+XRAY_CONFIG_CHANGED=0
 
 usage() {
   cat <<'EOF'
@@ -285,15 +287,26 @@ install_xray() {
   install -d -m 755 /usr/local/etc/xray /etc/systemd/system/xray.service.d
 }
 
+xray_config_backup() {
+  printf '%s\n' "$BELKA_CONFIG_DIR/xray-config.prev"
+}
+
+# Snapshot the config that is currently on disk before rendering a replacement.
+# If this fails, the caller aborts before touching $XRAY_CONFIG.
+backup_xray_config() {
+  [[ -f $XRAY_CONFIG ]] || return 0
+  install -d -m 700 "$BELKA_CONFIG_DIR"
+  install -m 600 "$XRAY_CONFIG" "$(xray_config_backup)"
+}
+
 render_xray() {
   xray_google_v6_fragments
   export FOREIGN_TUNNEL_IP SOCKS_PORT XRAY_EXTRA_OUTBOUNDS XRAY_EXTRA_RULES
-  render_template "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
-    /usr/local/etc/xray/config.json 644
+  backup_xray_config
+  render_template_validated "$SCRIPT_DIR/../config/foreign/xray-socks.json.tpl" \
+    "$XRAY_CONFIG" 644 /usr/local/bin/xray run -test -config
   local cfg_changed=$TEMPLATE_CHANGED
-
-  /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json >>"$LOG" 2>&1 \
-    || die "xray config test failed"
+  XRAY_CONFIG_CHANGED=$cfg_changed
 
   write_if_changed /etc/systemd/system/xray.service.d/10-awg.conf 644 <<'EOF'
 [Unit]
@@ -309,14 +322,27 @@ EOF
     TEMPLATE_CHANGED=0
   fi
   systemctl enable xray >>"$LOG" 2>&1 || true
-  log INFO "rendered /usr/local/etc/xray/config.json"
+  log INFO "rendered $XRAY_CONFIG"
 }
 
 start_xray() {
+  local backup
+  backup=$(xray_config_backup)
   if (( TEMPLATE_CHANGED )) || ! systemctl is-active -q xray; then
-    systemctl restart xray >>"$LOG" 2>&1 \
-      || die "xray failed to start; check: journalctl -u xray -n 100"
+    if ! systemctl restart xray >>"$LOG" 2>&1; then
+      if (( XRAY_CONFIG_CHANGED )) && [[ -f $backup ]]; then
+        warn "xray failed with the new config; restoring $backup"
+        install -m 644 "$backup" "$XRAY_CONFIG"
+        if ! systemctl restart xray >>"$LOG" 2>&1; then
+          die "xray failed to start and restoring the previous config did not help; check: journalctl -u xray -n 100"
+        fi
+        die "xray failed with the new config; previous config restored and xray is running"
+      fi
+      die "xray failed to start; check: journalctl -u xray -n 100"
+    fi
     log INFO "xray restarted"
+    install -m 600 "$XRAY_CONFIG" "$backup" \
+      || warn "could not refresh $backup"
   else
     log INFO "xray unchanged and active"
   fi
@@ -391,6 +417,10 @@ uninstall_foreign() {
 
 main() {
   parse_args "$@"
+  if (( UNINSTALL && DRY_RUN )); then
+    printf 'error: --uninstall and --dry-run are mutually exclusive\n' >&2
+    exit 2
+  fi
   belka_init foreign
   need_root
   check_os
@@ -428,12 +458,14 @@ main() {
 
   # RU public key: explicit argument > handoff file > stored handoff.
   if [[ -n $HANDOFF_IN ]]; then
-    load_handoff "$HANDOFF_IN"
+    load_handoff "$HANDOFF_IN" ru
     install -D -m 600 "$HANDOFF_IN" "$BELKA_CONFIG_DIR/ru-handoff.env"
   elif [[ -r $BELKA_CONFIG_DIR/ru-handoff.env ]]; then
-    load_handoff "$BELKA_CONFIG_DIR/ru-handoff.env"
+    load_handoff "$BELKA_CONFIG_DIR/ru-handoff.env" ru
   fi
   if [[ -n $RU_PUB_KEY_ARG ]]; then
+    handoff_valid_wg_key "$RU_PUB_KEY_ARG" \
+      || die "--ru-pub is not a valid WireGuard public key"
     RU_PUBLIC_KEY=$RU_PUB_KEY_ARG
   fi
   export RU_PUBLIC_KEY="${RU_PUBLIC_KEY:-}"

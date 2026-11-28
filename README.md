@@ -268,7 +268,7 @@ bash /root/bootstrap.sh foreign --ref main --env-file /etc/belka-vpn/foreign.env
 
 Скрипты идемпотентны: повторный запуск не дублирует правила, не перегенерирует ключи и не перезапускает сервисы без изменений. Ротация — `ROTATE_KEYS=1` / `ROTATE_OBFUSCATION=1` (с последующей передачей handoff на другую сторону, см. `docs/runbook.md`).
 
-Дополнительные аргументы `bootstrap.sh` передаются установщику; явный разделитель — `--`, например `bootstrap.sh ru -- --handoff /root/belka-foreign-handoff.env --dry-run`. Сам `bootstrap.sh` забирает `--ref`, `--env-file`, `-h`.
+Дополнительные аргументы `bootstrap.sh` передаются установщику; явный разделитель — `--`, например `bootstrap.sh ru -- --handoff /root/belka-foreign-handoff.env --dry-run`. Сам `bootstrap.sh` забирает `--ref`, `--env-file`, `-h`. С `--dry-run` он не выполняет `apt-get` и `git fetch/checkout`, требует уже существующий checkout в `/opt/belka-vpn` и передаёт `--dry-run` установщику.
 
 ## Откат
 
@@ -282,6 +282,7 @@ Hiddify Manager удаляется отдельно (официальный unin
 ## Безопасность
 
 - Приватные ключи AWG генерируются на серверах и не покидают их; handoff содержит только публичные ключи и параметры.
+- Handoff разбирается как набор строк `KEY=VALUE` по списку допустимых полей для роли и не исполняется как shell-код; посторонние поля и значения отклоняются.
 - В публичный репозиторий не попадают `.env`, ключи, handoff-файлы и admin-ссылка Hiddify.
 - `ufw` включается только на зарубежном сервере. На РФ firewall управляет Hiddify Manager.
 - `HARDEN_SSH=1` запрещает вход по паролю и X11-проброс (root — только по ключу). Включайте только после проверки ключа во второй сессии.

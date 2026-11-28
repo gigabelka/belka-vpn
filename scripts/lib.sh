@@ -105,20 +105,138 @@ load_env_file() {
   return 0
 }
 
+# Handoff files carry public data only. Parse them as KEY=VALUE lines against a
+# per-role allowlist instead of sourcing them: a handoff must not be able to run
+# commands or overwrite unrelated variables.
+handoff_field_allowed() {
+  local role=$1 key=$2
+  case "$role:$key" in
+    ru:BELKA_ROLE|ru:RU_PUBLIC_IP|ru:RU_TUNNEL_IP|ru:RU_PUBLIC_KEY)
+      return 0 ;;
+    foreign:BELKA_ROLE|foreign:FOREIGN_PUBLIC_IP|foreign:RU_PUBLIC_IP|\
+    foreign:AWG_PORT|foreign:TUNNEL_NET|foreign:FOREIGN_TUNNEL_IP|\
+    foreign:RU_TUNNEL_IP|foreign:SOCKS_PORT|foreign:AWG_MTU|\
+    foreign:FOREIGN_PUBLIC_KEY|foreign:AWG_JC|foreign:AWG_JMIN|\
+    foreign:AWG_JMAX|foreign:AWG_S1|foreign:AWG_S2|foreign:AWG_S3|\
+    foreign:AWG_S4|foreign:AWG_H1|foreign:AWG_H2|foreign:AWG_H3|\
+    foreign:AWG_H4|foreign:REALITY_SNI)
+      return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+handoff_valid_ipv4() { ipv4_to_int "$1" >/dev/null 2>&1; }
+
+handoff_valid_cidr() {
+  local value=$1 prefix
+  [[ $value =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$ ]] || return 1
+  handoff_valid_ipv4 "${value%/*}" || return 1
+  prefix=${value##*/}
+  (( 10#$prefix <= 32 ))
+}
+
+handoff_valid_port() {
+  [[ $1 =~ ^[1-9][0-9]{0,4}$ ]] && (( 10#$1 <= 65535 ))
+}
+
+handoff_valid_uint() {
+  [[ $1 =~ ^[0-9]{1,10}$ ]] && (( 10#$1 <= 2147483647 ))
+}
+
+handoff_valid_mtu() {
+  [[ $1 =~ ^[0-9]{3,5}$ ]] && (( 10#$1 >= 576 && 10#$1 <= 9000 ))
+}
+
+handoff_valid_wg_key() {
+  [[ $1 =~ ^[A-Za-z0-9+/]{43}=$ ]]
+}
+
+handoff_valid_hostname() {
+  local value=$1
+  (( ${#value} >= 1 && ${#value} <= 253 )) || return 1
+  [[ $value =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
+}
+
+handoff_validate_value() {
+  local key=$1 value=$2
+  case $key in
+    *_PUBLIC_IP|*_TUNNEL_IP) handoff_valid_ipv4 "$value" ;;
+    TUNNEL_NET) handoff_valid_cidr "$value" ;;
+    AWG_PORT|SOCKS_PORT) handoff_valid_port "$value" ;;
+    AWG_MTU) handoff_valid_mtu "$value" ;;
+    AWG_JC|AWG_JMIN|AWG_JMAX|AWG_S[1-4]|AWG_H[1-4]) handoff_valid_uint "$value" ;;
+    *_PUBLIC_KEY) handoff_valid_wg_key "$value" ;;
+    REALITY_SNI) handoff_valid_hostname "$value" ;;
+    *) return 1 ;;
+  esac
+}
+
+# load_handoff FILE PRODUCER_ROLE
+# PRODUCER_ROLE is the role that wrote the file: RU loads "ru", FOREIGN and
+# verify load "foreign". Required fields must be present in the file itself.
 load_handoff() {
-  local f=$1
+  local f=$1 expected_role=${2:?handoff producer role required (ru|foreign)}
   [[ -r $f ]] || die "handoff not found: $f"
+  case $expected_role in
+    ru|foreign) ;;
+    *) die "handoff role must be ru or foreign: $expected_role" ;;
+  esac
+
   if grep -Eiq '^(FOREIGN|RU)_PRIVATE_KEY[[:space:]]*=|BEGIN [A-Z ]*PRIVATE KEY|PASSWORD[[:space:]]*=|SECRET[[:space:]]*=' "$f"; then
     die "refusing handoff containing secrets: $f"
   fi
   local mode
   mode=$(stat -c %a "$f" 2>/dev/null || echo unknown)
   [[ $mode == 600 ]] || warn "handoff $f has mode $mode (expected 600)"
-  # shellcheck disable=SC1090
-  set -a
-  . "$f"
-  set +a
-  log INFO "loaded handoff: $f"
+
+  local -A seen=()
+  local line key value lineno=0
+  while IFS= read -r line || [[ -n $line ]]; do
+    lineno=$((lineno + 1))
+    line=${line%$'\r'}
+    if (( lineno == 1 )); then
+      line=${line#$'\xEF\xBB\xBF'}
+    fi
+    if [[ $line =~ ^[[:space:]]*$ ]] || [[ $line =~ ^[[:space:]]*# ]]; then
+      continue
+    fi
+    if [[ ! $line =~ ^([A-Z][A-Z0-9_]*)=(.*)$ ]]; then
+      die "handoff $f:$lineno: malformed line (expected KEY=VALUE)"
+    fi
+    key=${BASH_REMATCH[1]}
+    value=${BASH_REMATCH[2]}
+    [[ -n $value ]] || die "handoff $f:$lineno: empty value for $key"
+    [[ $value =~ ^[A-Za-z0-9._:/+=-]+$ ]] \
+      || die "handoff $f:$lineno: invalid characters in $key"
+    [[ -z ${seen[$key]:-} ]] || die "handoff $f:$lineno: duplicate field $key"
+    handoff_field_allowed "$expected_role" "$key" \
+      || die "handoff $f:$lineno: unexpected field $key for role $expected_role"
+    seen[$key]=1
+    if [[ $key == BELKA_ROLE ]]; then
+      [[ $value == "$expected_role" ]] \
+        || die "handoff $f: BELKA_ROLE=$value, expected producer role $expected_role"
+    else
+      handoff_validate_value "$key" "$value" \
+        || die "handoff $f:$lineno: invalid value for $key"
+    fi
+    printf -v "$key" '%s' "$value"
+    export "$key"
+  done < "$f"
+
+  local -a required=()
+  local k
+  case $expected_role in
+    ru) required=(BELKA_ROLE RU_PUBLIC_IP RU_TUNNEL_IP RU_PUBLIC_KEY) ;;
+    foreign)
+      required=(BELKA_ROLE FOREIGN_PUBLIC_IP RU_PUBLIC_IP AWG_PORT TUNNEL_NET
+        FOREIGN_TUNNEL_IP RU_TUNNEL_IP SOCKS_PORT AWG_MTU FOREIGN_PUBLIC_KEY
+        AWG_JC AWG_JMIN AWG_JMAX AWG_S1 AWG_S2 AWG_H1 AWG_H2 AWG_H3 AWG_H4)
+      ;;
+  esac
+  for k in "${required[@]}"; do
+    [[ -n ${seen[$k]:-} ]] || die "handoff $f: missing required field $k"
+  done
+  log INFO "loaded handoff: $f (role $expected_role)"
 }
 
 # ------------------------------------------------------------------- apt ---
@@ -308,6 +426,32 @@ render_template() {
   local tmp
   tmp=$(mktemp)
   envsubst < "$tpl" > "$tmp" || { rm -f "$tmp"; die "envsubst failed: $tpl"; }
+  if [[ -f $out ]] && cmp -s "$tmp" "$out"; then
+    rm -f "$tmp"
+    TEMPLATE_CHANGED=0
+  else
+    install -D -m "$mode" "$tmp" "$out"
+    rm -f "$tmp"
+    TEMPLATE_CHANGED=1
+  fi
+}
+
+# render_template_validated TEMPLATE DEST MODE VALIDATOR [ARGS...]
+# Like render_template, but runs VALIDATOR <tmpfile> before installing anything.
+# The destination is left untouched when validation fails. Sets TEMPLATE_CHANGED.
+# Call only after belka_init: validator output goes to $LOG.
+render_template_validated() {
+  (( $# >= 4 )) || die "render_template_validated: TEMPLATE DEST MODE VALIDATOR required"
+  local tpl=$1 out=$2 mode=$3
+  shift 3
+  [[ -r $tpl ]] || die "template not found: $tpl"
+  local tmp
+  tmp=$(mktemp)
+  envsubst < "$tpl" > "$tmp" || { rm -f "$tmp"; die "envsubst failed: $tpl"; }
+  if ! "$@" "$tmp" >>"$LOG" 2>&1; then
+    rm -f "$tmp"
+    die "rendered $out failed validation ($1); existing file kept (details in $LOG)"
+  fi
   if [[ -f $out ]] && cmp -s "$tmp" "$out"; then
     rm -f "$tmp"
     TEMPLATE_CHANGED=0
